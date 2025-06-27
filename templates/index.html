@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IAction - Analyse Vidéo IA</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='style.css') }}" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-dark">
+        <div class="container-fluid">
+            <span class="navbar-brand mb-0 h1">
+                <i class="bi bi-camera-video"></i> IAction - Analyse Vidéo IA
+            </span>
+            <div class="d-flex align-items-center">
+                <span id="status-indicator" class="badge bg-secondary me-2">Arrêté</span>
+                <button id="emergency-stop" class="btn btn-danger btn-sm">
+                    <i class="bi bi-stop-circle"></i> Arrêt d'urgence
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid mt-3">
+        <div class="row">
+            <!-- Panneau de contrôle -->
+            <div class="col-md-4">
+                <div class="card mb-3">
+                    <div class="card-header">
+                        <h5><i class="bi bi-gear"></i> Configuration Caméra</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label for="camera-select" class="form-label">Source vidéo</label>
+                            <div class="input-group">
+                                <select id="camera-select" class="form-select">
+                                    <option value="">Chargement...</option>
+                                </select>
+                                <button id="detect-cameras" class="btn btn-outline-secondary" type="button" title="Détecter les vraies caméras USB">
+                                    <i class="bi bi-search"></i>
+                                </button>
+                            </div>
+                            <div class="form-text">Cliquez sur la loupe pour détecter les vraies caméras USB connectées</div>
+                        </div>
+                        
+                        <div id="rtsp-config" class="mb-3" style="display: none;">
+                            <label for="rtsp-url" class="form-label">URL RTSP</label>
+                            <input type="text" id="rtsp-url" class="form-control" 
+                                   placeholder="rtsp://username:password@ip:port/stream">
+                            <div class="form-text">Exemple: rtsp://admin:password@192.168.1.100:554/stream1</div>
+                        </div>
+                        
+                        <div class="d-grid gap-2">
+                            <button id="start-capture" class="btn btn-success">
+                                <i class="bi bi-play-circle"></i> Démarrer la capture
+                            </button>
+                            <button id="stop-capture" class="btn btn-danger" disabled>
+                                <i class="bi bi-stop-circle"></i> Arrêter la capture
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Capteurs fixes -->
+                <div class="card mb-3">
+                    <div class="card-header">
+                        <h5><i class="bi bi-speedometer2"></i> Capteurs Fixes</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row text-center">
+                            <div class="col-6">
+                                <div class="border rounded p-2">
+                                    <div class="h4 text-primary" id="people-count">-</div>
+                                    <small>Personnes</small>
+                                </div>
+                            </div>
+                            <div class="col-6">
+                                <div class="border rounded p-2">
+                                    <div class="small text-muted" id="scene-description">En attente...</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Détections personnalisées -->
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5><i class="bi bi-search"></i> Détections Personnalisées</h5>
+                        <button id="add-detection" class="btn btn-primary btn-sm">
+                            <i class="bi bi-plus"></i> Ajouter
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div id="detections-list">
+                            <p class="text-muted">Aucune détection configurée</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Flux vidéo -->
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-header">
+                        <h5><i class="bi bi-camera"></i> Flux Vidéo en Direct</h5>
+                    </div>
+                    <div class="card-body text-center">
+                        <div id="video-container">
+                            <img id="video-stream" src="" alt="Flux vidéo" class="img-fluid rounded" style="display: none; max-height: 500px;">
+                            <div id="no-video" class="text-muted">
+                                <i class="bi bi-camera-video-off" style="font-size: 4rem;"></i>
+                                <p class="mt-2">Aucun flux vidéo actif</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Logs -->
+                <div class="card mt-3">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h6><i class="bi bi-list-ul"></i> Journal d'activité</h6>
+                        <button id="clear-logs" class="btn btn-outline-secondary btn-sm">
+                            <i class="bi bi-trash"></i> Effacer
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div id="activity-log" style="height: 200px; overflow-y: auto; font-family: monospace; font-size: 0.85rem;">
+                            <div class="text-muted">En attente d'activité...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal pour ajouter une détection -->
+    <div class="modal fade" id="addDetectionModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Ajouter une Détection</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="detection-form">
+                        <div class="mb-3">
+                            <label for="detection-name" class="form-label">Nom de la détection</label>
+                            <input type="text" id="detection-name" class="form-control" required
+                                   placeholder="Ex: Personne avec rouleau de scotch">
+                        </div>
+                        <div class="mb-3">
+                            <label for="detection-phrase" class="form-label">Phrase de correspondance</label>
+                            <textarea id="detection-phrase" class="form-control" rows="3" required
+                                      placeholder="Ex: un homme qui tient un rouleau de scotch"></textarea>
+                            <div class="form-text">Décrivez précisément ce que l'IA doit détecter dans l'image</div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                    <button type="button" id="save-detection" class="btn btn-primary">Sauvegarder</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
