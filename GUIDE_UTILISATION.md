@@ -23,16 +23,32 @@ Ouvrez votre navigateur sur : `http://localhost:5000`
 ## 📋 Prérequis
 
 ### Services Requis
-1. **Ollama** avec un modèle vision installé
+1. **OpenAI API** ou **LM Studio** pour l'analyse d'images
 2. **Broker MQTT** (optionnel pour Home Assistant)
 
-### Installation d'Ollama
+### Options pour l'API Vision
+
+#### Option 1: OpenAI API (recommandé)
 ```bash
-# Téléchargez depuis https://ollama.ai
-# Puis installez un modèle vision :
-ollama pull llama3.2-vision:latest
-# ou
-ollama pull gemma2:latest
+# Obtenez une clé API sur https://platform.openai.com
+# Puis configurez-la dans le fichier .env
+```
+
+#### Option 2: LM Studio (local)
+```bash
+# Téléchargez depuis https://lmstudio.ai
+# Installez un modèle vision compatible (comme qwen2.5-vl-7b)
+# Démarrez le serveur API dans LM Studio sur le port 11434
+```
+
+#### Option 3: LM Studio avec Ollama (configuration alternative)
+```bash
+# Vous pouvez utiliser LM Studio pour accéder aux modèles d'Ollama
+# 1. Installez Ollama depuis https://ollama.ai
+# 2. Installez un modèle vision : ollama pull qwen2.5vl:7b
+# 3. Démarrez Ollama
+# 4. Configurez AI_API_MODE=lmstudio dans .env
+# 5. Assurez-vous que LMSTUDIO_URL pointe vers http://127.0.0.1:11434/v1
 ```
 
 ### Installation Mosquitto (MQTT)
@@ -48,10 +64,20 @@ docker run -it -p 1883:1883 eclipse-mosquitto
 Modifiez le fichier `.env` avec vos paramètres :
 
 ```env
-# Ollama
-OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=llama3.2-vision:latest
+# Configuration AI (OpenAI ou LM Studio)
+AI_API_MODE=lmstudio  # Options: 'openai' ou 'lmstudio'
+AI_TIMEOUT=60
 
+# Configuration OpenAI
+OPENAI_API_KEY=sk-your-api-key-here
+OPENAI_MODEL=gpt-4-vision-preview
+
+# Configuration LM Studio (compatible avec l'API d'Ollama sur le port 11434)
+LMSTUDIO_URL=http://127.0.0.1:11434/v1
+LMSTUDIO_MODEL=qwen/qwen2.5-vl-7b
+# Configuration Ollama (obsolète)
+# OLLAMA_BASE_URL=http://localhost:11434
+# OLLAMA_MODEL=qwen2.5vl:7b
 # MQTT (pour Home Assistant)
 MQTT_BROKER=192.168.1.100
 MQTT_PORT=1883
@@ -64,6 +90,45 @@ HA_DEVICE_ID=iaction_camera_ai
 ```
 
 ## 🎯 Utilisation
+
+### 💻 Configuration de l'API Vision
+
+### Utilisation de LM Studio avec Ollama (Configuration actuelle)
+
+La configuration actuelle utilise LM Studio pour accéder aux modèles d'Ollama via l'API compatible OpenAI. Voici comment cela fonctionne :
+
+1. **Installation d'Ollama** :
+   ```bash
+   # Téléchargez depuis https://ollama.ai
+   # Puis installez le modèle vision Qwen
+   ollama pull qwen2.5vl:7b
+   ```
+
+2. **Configuration du fichier .env** :
+   ```env
+   AI_API_MODE=lmstudio
+   LMSTUDIO_URL=http://127.0.0.1:11434/v1
+   LMSTUDIO_MODEL=qwen/qwen2.5-vl-7b
+   ```
+
+3. **Fonctionnement** :
+   - L'application se connecte à l'API d'Ollama sur le port 11434
+   - Elle utilise le format de requête compatible avec l'API OpenAI
+   - Les images sont envoyées au modèle Qwen pour analyse
+   - Les résultats sont traités et publiés via MQTT
+
+### Utilisation de l'API OpenAI (Alternative)
+
+Pour utiliser l'API OpenAI officielle :
+
+1. **Obtenir une clé API** sur https://platform.openai.com
+
+2. **Modifier le fichier .env** :
+   ```env
+   AI_API_MODE=openai
+   OPENAI_API_KEY=sk-votre-clé-api-ici
+   OPENAI_MODEL=gpt-4-vision-preview
+   ```
 
 ### Configuration d'une Caméra
 
@@ -98,7 +163,6 @@ HA_DEVICE_ID=iaction_camera_ai
 
 L'application génère automatiquement :
 - **Compteur de personnes** : Nombre de personnes visibles
-- **Description de scène** : Description de ce qui se passe
 
 ## 🏠 Intégration Home Assistant
 
@@ -156,7 +220,7 @@ ollama serve
 curl http://localhost:11434/api/tags
 
 # Installez un modèle si nécessaire
-ollama pull llama3.2-vision:latest
+ollama pull qwen2.5vl:7b
 ```
 
 #### "Erreur MQTT"
@@ -168,7 +232,6 @@ mosquitto_sub -h localhost -t test
 ```
 
 #### "Analyse IA lente"
-- Utilisez un modèle plus léger (gemma2 au lieu de llama3.2-vision)
 - Réduisez la résolution de la caméra
 - Vérifiez les ressources système (CPU/RAM)
 
@@ -211,8 +274,8 @@ mosquitto_sub -h localhost -t test
 
 ### Informations Utiles
 - Version Python : `python --version`
-- Modèles Ollama : `ollama list`
 - État des services : `python test_config.py`
+- Mode API actuel : vérifiez `AI_API_MODE` dans le fichier `.env`
 
 ---
 

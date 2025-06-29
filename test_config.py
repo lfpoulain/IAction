@@ -85,7 +85,7 @@ def test_ollama():
     
     load_dotenv()
     ollama_url = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
-    model = os.getenv('OLLAMA_MODEL', 'llama3.2-vision:latest')
+    model = os.getenv('OLLAMA_MODEL', 'qwen2.5vl:7b')
     
     try:
         # Test de connexion

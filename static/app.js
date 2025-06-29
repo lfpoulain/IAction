@@ -59,8 +59,8 @@ class IActionApp {
         select.appendChild(loadingOption);
         
         try {
-            // Utiliser l'API rapide par défaut
-            const response = await fetch('/api/cameras/quick');
+            // Utiliser l'API de détection des caméras
+            const response = await fetch('/api/cameras');
             const cameras = await response.json();
             
             select.innerHTML = '<option value="">Sélectionnez une source...</option>';
@@ -183,9 +183,11 @@ class IActionApp {
         }
         
         let source = selectedOption.value;
-        const type = selectedOption.dataset.type;
+        // Déterminer le type de caméra en fonction de l'ID
+        let type = 'usb';
         
-        if (type === 'rtsp' && source === 'rtsp_custom') {
+        if (source === 'rtsp_custom') {
+            type = 'rtsp';
             const rtspUrl = document.getElementById('rtsp-url').value.trim();
             if (!rtspUrl) {
                 this.addLog('Veuillez saisir une URL RTSP', 'warning');
@@ -269,16 +271,26 @@ class IActionApp {
         const videoStream = document.getElementById('video-stream');
         const noVideo = document.getElementById('no-video');
         
+        // Ajouter un paramètre unique pour éviter la mise en cache
         videoStream.src = '/video_feed?' + new Date().getTime();
         videoStream.style.display = 'block';
         noVideo.style.display = 'none';
         
-        // Mettre à jour le flux périodiquement
-        this.videoUpdateInterval = setInterval(() => {
-            if (this.isCapturing) {
-                videoStream.src = '/video_feed?' + new Date().getTime();
-            }
-        }, 5000);
+        // Supprimer la mise à jour périodique du flux vidéo qui cause des reconnexions
+        // Le flux MJPEG est déjà en streaming continu et n'a pas besoin d'être rechargé
+        if (this.videoUpdateInterval) {
+            clearInterval(this.videoUpdateInterval);
+        }
+        
+        // Ajouter un gestionnaire d'erreur pour le flux vidéo
+        videoStream.onerror = () => {
+            console.log("Erreur de chargement du flux vidéo, tentative de reconnexion...");
+            setTimeout(() => {
+                if (this.isCapturing) {
+                    videoStream.src = '/video_feed?' + new Date().getTime();
+                }
+            }, 2000);
+        };
     }
     
     stopVideoStream() {
@@ -360,14 +372,53 @@ class IActionApp {
     }
     
     startStatusUpdates() {
+        // Augmenter l'intervalle de mise à jour pour réduire le nombre de requêtes
+        // Passer de 2 secondes à 5 secondes
         this.statusInterval = setInterval(() => {
             this.updateSensorValues();
-        }, 2000);
+        }, 5000);
     }
     
     async updateSensorValues() {
-        // Cette fonction pourrait être étendue pour récupérer les valeurs des capteurs
-        // depuis une API dédiée si nécessaire
+        try {
+            // Récupérer les informations de statut depuis l'API
+            const response = await fetch('/api/status');
+            if (response.ok) {
+                const data = await response.json();
+                
+                // Mettre à jour les indicateurs de temps d'analyse
+                this.updateAnalysisTimeIndicators(data);
+            }
+        } catch (error) {
+            console.error('Erreur lors de la récupération des valeurs des capteurs:', error);
+        }
+    }
+    
+    updateAnalysisTimeIndicators(statusData) {
+        const lastAnalysisTimeElement = document.getElementById('last-analysis-time');
+        const analysisDurationElement = document.getElementById('analysis-duration');
+        
+        if (statusData.last_analysis_time) {
+            // Calculer le temps écoulé depuis la dernière analyse
+            const now = Date.now() / 1000; // Timestamp actuel en secondes
+            const elapsed = now - statusData.last_analysis_time;
+            
+            if (elapsed < 60) {
+                lastAnalysisTimeElement.textContent = `${Math.round(elapsed)}s`;
+            } else if (elapsed < 3600) {
+                lastAnalysisTimeElement.textContent = `${Math.floor(elapsed / 60)}m ${Math.round(elapsed % 60)}s`;
+            } else {
+                lastAnalysisTimeElement.textContent = `${Math.floor(elapsed / 3600)}h ${Math.floor((elapsed % 3600) / 60)}m`;
+            }
+        } else {
+            lastAnalysisTimeElement.textContent = '-';
+        }
+        
+        if (statusData.last_analysis_duration) {
+            analysisDurationElement.textContent = `${statusData.last_analysis_duration}s`;
+        } else {
+            analysisDurationElement.textContent = '-';
+        }
     }
     
     addLog(message, type = 'info') {

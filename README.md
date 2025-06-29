@@ -10,13 +10,14 @@ Application web pour l'analyse vidéo en temps réel avec intelligence artificie
 - **Capture automatique** : Une image par seconde pour l'analyse IA
 
 ### Analyse IA
-- **Ollama Integration** : Utilise l'API locale Ollama
-- **Modèles supportés** : llama3.2-vision:latest, gemma2:latest
+- **API Vision flexible** : Supporte OpenAI API et LM Studio
+- **Modèles supportés** : 
+  - OpenAI : gpt-4-vision-preview
+  - LM Studio/Ollama : qwen2.5vl:7b
 - **Analyse personnalisable** : Système de détection configurable par l'utilisateur
 
 ### Capteurs Fixes
 - **Compteur de personnes** : Détection automatique du nombre de personnes
-- **Description de scène** : Description automatique de ce qui se passe dans l'image
 
 ### Détections Personnalisées
 - **Phrases de correspondance** : L'utilisateur définit des phrases de détection
@@ -32,7 +33,10 @@ Application web pour l'analyse vidéo en temps réel avec intelligence artificie
 
 ### Prérequis
 1. **Python 3.8+**
-2. **Ollama** installé et configuré avec un modèle vision
+2. **Au choix** :
+   - **OpenAI API** : Clé API valide
+   - **LM Studio** : Installé avec un modèle vision compatible
+   - **Ollama** : Installé avec un modèle vision (utilisé via LM Studio)
 3. **Broker MQTT** (ex: Mosquitto)
 4. **Home Assistant** (optionnel)
 
@@ -46,9 +50,17 @@ pip install -r requirements.txt
 2. Modifiez les paramètres selon votre configuration :
 
 ```env
-# Configuration Ollama
-OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=llama3.2-vision:latest
+# Configuration AI (OpenAI ou LM Studio)
+AI_API_MODE=lmstudio  # Options: 'openai' ou 'lmstudio'
+AI_TIMEOUT=60
+
+# Configuration OpenAI
+OPENAI_API_KEY=sk-your-api-key-here
+OPENAI_MODEL=gpt-4-vision-preview
+
+# Configuration LM Studio (compatible avec l'API d'Ollama)
+LMSTUDIO_URL=http://127.0.0.1:11434/v1
+LMSTUDIO_MODEL=qwen/qwen2.5-vl-7b
 
 # Configuration MQTT
 MQTT_BROKER=localhost
@@ -63,6 +75,45 @@ HA_DEVICE_ID=iaction_camera_ai
 ```
 
 ## Utilisation
+
+### Configuration de l'API Vision
+
+#### Option 1: LM Studio avec Ollama (Configuration actuelle)
+
+La configuration actuelle utilise LM Studio pour accéder aux modèles d'Ollama via l'API compatible OpenAI :
+
+1. **Installation d'Ollama** :
+   ```bash
+   # Téléchargez depuis https://ollama.ai
+   # Puis installez le modèle vision Qwen
+   ollama pull qwen2.5vl:7b
+   ```
+
+2. **Démarrage d'Ollama** :
+   ```bash
+   # Assurez-vous qu'Ollama est en cours d'exécution
+   # Il expose une API sur le port 11434
+   ```
+
+3. **Configuration dans .env** :
+   ```env
+   AI_API_MODE=lmstudio
+   LMSTUDIO_URL=http://127.0.0.1:11434/v1
+   LMSTUDIO_MODEL=qwen/qwen2.5-vl-7b
+   ```
+
+#### Option 2: API OpenAI
+
+Pour utiliser l'API OpenAI officielle :
+
+1. **Obtenir une clé API** sur https://platform.openai.com
+
+2. **Modifier le fichier .env** :
+   ```env
+   AI_API_MODE=openai
+   OPENAI_API_KEY=sk-votre-clé-api-ici
+   OPENAI_MODEL=gpt-4-vision-preview
+   ```
 
 ### Démarrage de l'application
 ```bash
@@ -126,7 +177,7 @@ app.py                 # Application Flask principale
 ```bash
 # Téléchargez depuis https://ollama.ai
 # Puis installez un modèle vision :
-ollama pull llama3.2-vision:latest
+ollama pull qwen2.5vl:7b
 ```
 
 ### Test de la connexion

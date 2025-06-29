@@ -38,7 +38,8 @@ class DetectionService:
             
             # Initialiser l'état du binary sensor
             self.binary_sensor_states[detection_id] = False
-            self.mqtt_service.publish_binary_sensor_state(sensor_id, False)
+            self.mqtt_service.buffer_binary_sensor_state(sensor_id, False)
+            self.mqtt_service.flush_message_buffer()
             
             return detection_id
     
@@ -66,89 +67,90 @@ class DetectionService:
         with self.lock:
             return list(self.detections.values())
     
-    def analyze_frame(self, image_base64: str):
-        """Analyse une image avec toutes les détections configurées"""
+    def analyze_frame(self, image_base64: str) -> dict:
+        """Analyse une image avec toutes les détections configurées
+        
+        Returns:
+            dict: Résultats de l'analyse avec les clés 'people_count', 'detections'
+        """
+        results = {
+            'people_count': None,
+            'detections': [],
+            'success': True,
+            'timestamp': time.time()
+        }
+        
         try:
-            # Analyser les capteurs fixes
-            self._analyze_fixed_sensors(image_base64)
+            # Récupérer la liste des détections personnalisées
+            with self.lock:
+                detections_list = [{
+                    'id': detection_id,
+                    'phrase': detection['phrase'],
+                    'name': detection['name']
+                } for detection_id, detection in self.detections.items()]
             
-            # Analyser les détections personnalisées
-            self._analyze_custom_detections(image_base64)
+            # Utiliser la méthode d'analyse combinée pour tout analyser en un seul appel
+            combined_results = self.ai_service.analyze_combined(image_base64, detections_list)
+            
+            if combined_results['success']:
+                # Mettre à jour le nombre de personnes
+                if 'people_count' in combined_results and combined_results['people_count']['success']:
+                    results['people_count'] = combined_results['people_count']['count']
+                    self.mqtt_service.buffer_sensor_value('people_count', results['people_count'])
+                
+                # Traiter les résultats des détections personnalisées
+                if 'detections' in combined_results:
+                    detection_results = []
+                    for detection_result in combined_results['detections']:
+                        detection_id = detection_result['id']
+                        is_match = detection_result['match']
+                        
+                        # Mettre à jour l'état du binary sensor si nécessaire
+                        if detection_id in self.detections:
+                            sensor_id = f"detection_{detection_id.replace('-', '_')}"
+                            
+                            # Ne publier que si l'état a changé
+                            if detection_id not in self.binary_sensor_states or self.binary_sensor_states[detection_id] != is_match:
+                                self.binary_sensor_states[detection_id] = is_match
+                                self.mqtt_service.buffer_binary_sensor_state(sensor_id, is_match)
+                            
+                            # Mettre à jour les statistiques de la détection
+                            if is_match:
+                                with self.lock:
+                                    if detection_id in self.detections:
+                                        self.detections[detection_id]['last_triggered'] = time.time()
+                                        self.detections[detection_id]['trigger_count'] += 1
+                            
+                            # Ajouter aux résultats
+                            detection_results.append({
+                                'id': detection_id,
+                                'name': self.detections[detection_id]['name'],
+                                'match': is_match,
+                                'success': True
+                            })
+                    
+                    results['detections'] = detection_results
+            else:
+                # En cas d'erreur dans l'analyse combinée
+                results['success'] = False
+                results['error'] = combined_results.get('error', 'Erreur inconnue dans l\'analyse combinée')
+            
+            # Sauvegarder les résultats pour référence
+            self.last_analysis_results = results.copy()
+            
+            # Envoyer tous les messages MQTT en une seule fois
+            self.mqtt_service.flush_message_buffer()
+            
+            return results
             
         except Exception as e:
             print(f"Erreur lors de l'analyse de l'image: {e}")
+            results['success'] = False
+            results['error'] = str(e)
+            return results
     
-    def _analyze_fixed_sensors(self, image_base64: str):
-        """Analyse les capteurs fixes (nombre de personnes, description)"""
-        try:
-            # Compter les personnes
-            people_result = self.ai_service.count_people(image_base64)
-            if people_result['success']:
-                count = people_result['count']
-                self.mqtt_service.publish_sensor_value('people_count', count)
-                print(f"Nombre de personnes détectées: {count}")
-            else:
-                print(f"Erreur comptage personnes: {people_result['error']}")
-            
-            # Décrire la scène
-            scene_result = self.ai_service.describe_scene(image_base64)
-            if scene_result['success']:
-                description = scene_result['response']
-                self.mqtt_service.publish_sensor_value('scene_description', description)
-                print(f"Description de la scène: {description}")
-            else:
-                print(f"Erreur description scène: {scene_result['error']}")
-                
-        except Exception as e:
-            print(f"Erreur lors de l'analyse des capteurs fixes: {e}")
-    
-    def _analyze_custom_detections(self, image_base64: str):
-        """Analyse les détections personnalisées"""
-        with self.lock:
-            detections_copy = dict(self.detections)
-        
-        for detection_id, detection in detections_copy.items():
-            try:
-                # Analyser avec l'IA
-                result = self.ai_service.check_custom_detection(
-                    image_base64, 
-                    detection['phrase']
-                )
-                
-                if result['success']:
-                    is_match = result['match']
-                    sensor_id = f"detection_{detection_id.replace('-', '_')}"
-                    
-                    # Mettre à jour l'état du binary sensor si nécessaire
-                    current_state = self.binary_sensor_states.get(detection_id, False)
-                    
-                    if is_match != current_state:
-                        self.binary_sensor_states[detection_id] = is_match
-                        self.mqtt_service.publish_binary_sensor_state(sensor_id, is_match)
-                        
-                        if is_match:
-                            # Mettre à jour les statistiques
-                            with self.lock:
-                                if detection_id in self.detections:
-                                    self.detections[detection_id]['last_triggered'] = time.time()
-                                    self.detections[detection_id]['trigger_count'] += 1
-                            
-                            print(f"Détection déclenchée: {detection['name']}")
-                        else:
-                            print(f"Détection arrêtée: {detection['name']}")
-                    
-                    # Sauvegarder le résultat pour le debug
-                    self.last_analysis_results[detection_id] = {
-                        'timestamp': time.time(),
-                        'match': is_match,
-                        'raw_response': result['raw_response']
-                    }
-                    
-                else:
-                    print(f"Erreur détection {detection['name']}: {result['error']}")
-                    
-            except Exception as e:
-                print(f"Erreur lors de l'analyse de la détection {detection['name']}: {e}")
+    # Les méthodes _analyze_fixed_sensors et _analyze_custom_detections ont été supprimées
+    # car elles sont remplacées par l'utilisation de la méthode analyze_combined du service AI
     
     def get_detection_status(self, detection_id: str) -> Dict[str, Any]:
         """Récupère le statut d'une détection"""
