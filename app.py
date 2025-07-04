@@ -39,8 +39,69 @@ def index():
 @app.route('/api/cameras')
 def get_cameras():
     """Récupère la liste des caméras disponibles"""
-    cameras = camera_service.get_available_cameras()
-    return jsonify(cameras)
+    try:
+        cameras = camera_service.get_available_cameras()
+        return jsonify({
+            'success': True,
+            'cameras': cameras,
+            'count': len(cameras),
+            'usb_count': len([c for c in cameras if c['type'] == 'usb']),
+            'rtsp_count': len([c for c in cameras if c['type'] == 'rtsp'])
+        })
+    except Exception as e:
+        print(f"Erreur lors de la récupération des caméras: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'cameras': []
+        }), 500
+
+@app.route('/api/cameras/refresh', methods=['POST'])
+def refresh_cameras():
+    """Force la mise à jour de la liste des caméras"""
+    try:
+        # Effacer le cache
+        camera_service._camera_cache = None
+        camera_service._cache_time = 0
+        
+        # Recharger les caméras
+        cameras = camera_service.get_available_cameras()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Liste des caméras mise à jour',
+            'cameras': cameras,
+            'count': len(cameras),
+            'usb_count': len([c for c in cameras if c['type'] == 'usb']),
+            'rtsp_count': len([c for c in cameras if c['type'] == 'rtsp'])
+        })
+    except Exception as e:
+        print(f"Erreur lors de la mise à jour des caméras: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/cameras/<camera_id>')
+def get_camera_info(camera_id):
+    """Récupère les informations détaillées d'une caméra"""
+    try:
+        camera_info = camera_service.get_camera_info(camera_id)
+        if camera_info:
+            return jsonify({
+                'success': True,
+                'camera': camera_info
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Caméra non trouvée'
+            }), 404
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 # Variable pour suivre les requêtes /api/status
 status_request_count = 0
@@ -73,26 +134,68 @@ def get_status():
 
 @app.route('/api/start_capture', methods=['POST'])
 def start_capture():
-    """Démarre la capture vidéo"""
+    """Démarre la capture vidéo avec support amélioré"""
     global is_capturing, capture_thread
     
-    data = request.json
-    source = data.get('source')
-    source_type = data.get('type')
-    
-    if is_capturing:
-        return jsonify({'error': 'Capture déjà en cours'}), 400
-    
-    success = camera_service.start_capture(source, source_type)
-    if not success:
-        return jsonify({'error': 'Impossible de démarrer la capture'}), 400
-    
-    is_capturing = True
-    capture_thread = threading.Thread(target=capture_loop)
-    capture_thread.daemon = True
-    capture_thread.start()
-    
-    return jsonify({'status': 'Capture démarrée'})
+    try:
+        data = request.json
+        source = data.get('source')
+        source_type = data.get('type')
+        rtsp_url = data.get('rtsp_url')  # URL RTSP personnalisée
+        
+        print(f"Tentative de démarrage - Source: {source}, Type: {source_type}, RTSP URL: {rtsp_url}")
+        
+        if is_capturing:
+            return jsonify({
+                'success': False,
+                'error': 'Capture déjà en cours'
+            }), 400
+        
+        if not source:
+            return jsonify({
+                'success': False,
+                'error': 'Source vidéo requise'
+            }), 400
+        
+        # Validation RTSP si nécessaire
+        if source_type == 'rtsp' and rtsp_url:
+            is_valid, message = camera_service.validate_rtsp_url(rtsp_url)
+            if not is_valid:
+                return jsonify({
+                    'success': False,
+                    'error': f'URL RTSP invalide: {message}'
+                }), 400
+        
+        # Démarrer la capture avec les nouveaux paramètres
+        success = camera_service.start_capture(source, source_type, rtsp_url)
+        
+        if not success:
+            return jsonify({
+                'success': False,
+                'error': 'Impossible de démarrer la capture'
+            }), 400
+        
+        is_capturing = True
+        capture_thread = threading.Thread(target=capture_loop)
+        capture_thread.daemon = True
+        capture_thread.start()
+        
+        # Obtenir les infos de la caméra utilisée
+        camera_info = camera_service.get_camera_info(source)
+        camera_name = camera_info['name'] if camera_info else f'Source {source}'
+        
+        return jsonify({
+            'success': True,
+            'message': f'Capture démarrée: {camera_name}',
+            'camera': camera_info
+        })
+        
+    except Exception as e:
+        print(f"Erreur lors du démarrage de la capture: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 @app.route('/api/stop_capture', methods=['POST'])
 def stop_capture():

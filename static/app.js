@@ -59,27 +59,52 @@ class IActionApp {
         select.appendChild(loadingOption);
         
         try {
-            // Utiliser l'API de détection des caméras
             const response = await fetch('/api/cameras');
-            const cameras = await response.json();
+            const data = await response.json();
             
-            select.innerHTML = '<option value="">Sélectionnez une source...</option>';
-            
-            cameras.forEach(camera => {
-                const option = document.createElement('option');
-                option.value = camera.id;
-                option.textContent = camera.name;
-                if (camera.type === 'rtsp_preset') {
-                    option.setAttribute('data-template', camera.url_template || '');
-                }
-                select.appendChild(option);
-            });
-            
-            this.addLog(`${cameras.filter(c => c.type === 'usb').length} caméra(s) USB détectée(s)`, 'info');
+            if (data.success) {
+                const cameras = data.cameras;
+                select.innerHTML = '<option value="">Sélectionnez une source...</option>';
+                
+                cameras.forEach(camera => {
+                    const option = document.createElement('option');
+                    option.value = camera.id;
+                    option.textContent = camera.name;
+                    option.setAttribute('data-type', camera.type);
+                    
+                    // Ajouter des attributs pour les caméras RTSP
+                    if (camera.type === 'rtsp' && camera.url) {
+                        option.setAttribute('data-url', camera.url);
+                    }
+                    
+                    // Ajouter le statut de connexion pour les caméras RTSP
+                    if (camera.test_status) {
+                        const statusEmoji = {
+                            'online': '🟢',
+                            'offline': '🔴',
+                            'error': '⚠️',
+                            'not_configured': '⚪'
+                        };
+                        option.textContent += ` ${statusEmoji[camera.test_status] || ''}`;
+                    }
+                    
+                    select.appendChild(option);
+                });
+                
+                const usbCount = data.usb_count || 0;
+                const rtspCount = data.rtsp_count || 0;
+                
+                this.addLog(`Caméras détectées: ${usbCount} USB, ${rtspCount} RTSP`, 'info');
+                
+                // Mise à jour du bouton de détection
+                this.updateDetectionButton(data.count);
+            } else {
+                throw new Error(data.error || 'Erreur inconnue');
+            }
         } catch (error) {
             console.error('Erreur lors du chargement des caméras:', error);
             select.innerHTML = '<option value="">Erreur de détection</option>';
-            this.addLog('Erreur lors du chargement des caméras', 'error');
+            this.addLog(`Erreur lors du chargement des caméras: ${error.message}`, 'error');
         }
     }
     
@@ -93,37 +118,61 @@ class IActionApp {
         
         const loadingOption = document.createElement('option');
         loadingOption.value = '';
-        loadingOption.textContent = 'Détection des vraies caméras USB...';
+        loadingOption.textContent = 'Rafraîchissement des caméras...';
         loadingOption.disabled = true;
         select.innerHTML = '';
         select.appendChild(loadingOption);
         
-        this.addLog('Détection des caméras USB en cours...', 'info');
+        this.addLog('Rafraîchissement de la liste des caméras...', 'info');
         
         try {
-            // Utiliser l'API complète pour détecter les vraies caméras
-            const response = await fetch('/api/cameras');
-            const cameras = await response.json();
-            
-            select.innerHTML = '<option value="">Sélectionnez une source...</option>';
-            
-            cameras.forEach(camera => {
-                const option = document.createElement('option');
-                option.value = camera.id;
-                option.textContent = camera.name;
-                if (camera.type === 'rtsp_preset') {
-                    option.setAttribute('data-template', camera.url_template || '');
-                }
-                select.appendChild(option);
+            // Utiliser l'API de rafraîchissement pour forcer la mise à jour
+            const response = await fetch('/api/cameras/refresh', {
+                method: 'POST'
             });
+            const data = await response.json();
             
-            const usbCount = cameras.filter(c => c.type === 'usb').length;
-            this.addLog(`Détection terminée: ${usbCount} caméra(s) USB trouvée(s)`, 'success');
-            
+            if (data.success) {
+                const cameras = data.cameras;
+                select.innerHTML = '<option value="">Sélectionnez une source...</option>';
+                
+                cameras.forEach(camera => {
+                    const option = document.createElement('option');
+                    option.value = camera.id;
+                    option.textContent = camera.name;
+                    option.setAttribute('data-type', camera.type);
+                    
+                    // Ajouter des attributs pour les caméras RTSP
+                    if (camera.type === 'rtsp' && camera.url) {
+                        option.setAttribute('data-url', camera.url);
+                    }
+                    
+                    // Ajouter le statut de connexion pour les caméras RTSP
+                    if (camera.test_status) {
+                        const statusEmoji = {
+                            'online': '🟢',
+                            'offline': '🔴',
+                            'error': '⚠️',
+                            'not_configured': '⚪'
+                        };
+                        option.textContent += ` ${statusEmoji[camera.test_status] || ''}`;
+                    }
+                    
+                    select.appendChild(option);
+                });
+                
+                const usbCount = data.usb_count || 0;
+                const rtspCount = data.rtsp_count || 0;
+                
+                this.addLog(`Mise à jour terminée: ${usbCount} USB, ${rtspCount} RTSP trouvée(s)`, 'success');
+                this.updateDetectionButton(data.count);
+            } else {
+                throw new Error(data.error || 'Erreur lors du rafraîchissement');
+            }
         } catch (error) {
             console.error('Erreur lors de la détection:', error);
             select.innerHTML = '<option value="">Erreur de détection</option>';
-            this.addLog('Erreur lors de la détection des caméras', 'error');
+            this.addLog(`Erreur lors du rafraîchissement: ${error.message}`, 'error');
         } finally {
             // Réactiver le bouton
             detectBtn.disabled = false;
@@ -183,42 +232,63 @@ class IActionApp {
         }
         
         let source = selectedOption.value;
-        // Déterminer le type de caméra en fonction de l'ID
-        let type = 'usb';
+        let type = selectedOption.getAttribute('data-type') || 'usb';
+        let rtspUrl = null;
         
+        // Gestion spéciale pour RTSP personnalisé
         if (source === 'rtsp_custom') {
             type = 'rtsp';
-            const rtspUrl = document.getElementById('rtsp-url').value.trim();
+            rtspUrl = document.getElementById('rtsp-url').value.trim();
             if (!rtspUrl) {
                 this.addLog('Veuillez saisir une URL RTSP', 'warning');
                 return;
             }
             source = rtspUrl;
+        } else if (type === 'rtsp') {
+            // Pour les caméras RTSP préconfigurées
+            rtspUrl = selectedOption.getAttribute('data-url') || null;
         }
         
+        console.log(`Démarrage capture - Source: ${source}, Type: ${type}, RTSP URL: ${rtspUrl}`);
+        
         try {
+            const requestBody = {
+                source: source,
+                type: type
+            };
+            
+            if (rtspUrl) {
+                requestBody.rtsp_url = rtspUrl;
+            }
+            
             const response = await fetch('/api/start_capture', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({
-                    source: source,
-                    type: type
-                })
+                body: JSON.stringify(requestBody)
             });
             
             const result = await response.json();
             
-            if (response.ok) {
+            if (result.success || response.ok) {
                 this.isCapturing = true;
                 this.updateCaptureControls();
                 this.startVideoStream();
-                this.addLog(`Capture démarrée: ${selectedOption.textContent}`, 'success');
+                
+                const message = result.message || `Capture démarrée: ${selectedOption.textContent}`;
+                this.addLog(message, 'success');
+                
+                // Afficher les infos de la caméra si disponibles
+                if (result.camera) {
+                    this.displayCameraInfo(result.camera);
+                }
             } else {
-                this.addLog(`Erreur: ${result.error}`, 'error');
+                const errorMsg = result.error || 'Erreur lors du démarrage';
+                this.addLog(`Erreur: ${errorMsg}`, 'error');
             }
         } catch (error) {
+            console.error('Erreur lors du démarrage:', error);
             this.addLog(`Erreur lors du démarrage: ${error.message}`, 'error');
         }
     }
@@ -450,9 +520,57 @@ class IActionApp {
         logContainer.scrollTop = logContainer.scrollHeight;
     }
     
+    updateDetectionButton(cameraCount) {
+        const detectBtn = document.getElementById('detect-cameras');
+        if (detectBtn) {
+            const originalTitle = 'Détecter les vraies caméras USB';
+            if (cameraCount > 0) {
+                detectBtn.title = `${originalTitle} (${cameraCount} détectées)`;
+                detectBtn.classList.add('btn-outline-success');
+                detectBtn.classList.remove('btn-outline-secondary');
+            } else {
+                detectBtn.title = originalTitle;
+                detectBtn.classList.add('btn-outline-secondary');
+                detectBtn.classList.remove('btn-outline-success');
+            }
+        }
+    }
+    
+    displayCameraInfo(camera) {
+        if (!camera) return;
+        
+        const infoMessage = [];
+        if (camera.type === 'usb') {
+            infoMessage.push(`Type: Caméra USB`);
+            if (camera.resolution) {
+                infoMessage.push(`Résolution: ${camera.resolution}`);
+            }
+            if (camera.path) {
+                infoMessage.push(`Périphérique: ${camera.path}`);
+            }
+        } else if (camera.type === 'rtsp') {
+            infoMessage.push(`Type: Caméra IP (RTSP)`);
+            if (camera.test_status) {
+                const statusText = {
+                    'online': 'En ligne',
+                    'offline': 'Hors ligne',
+                    'error': 'Erreur de connexion',
+                    'not_configured': 'Non configurée'
+                };
+                infoMessage.push(`Statut: ${statusText[camera.test_status] || 'Inconnu'}`);
+            }
+        }
+        
+        if (infoMessage.length > 0) {
+            this.addLog(`Infos caméra - ${infoMessage.join(', ')}`, 'info');
+        }
+    }
+    
     clearLogs() {
         const logContainer = document.getElementById('activity-log');
-        logContainer.innerHTML = '<div class="text-muted">En attente d\'activité...</div>';
+        if (logContainer) {
+            logContainer.innerHTML = '<div class="text-muted">En attente d\'activité...</div>';
+        }
     }
 }
 
