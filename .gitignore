@@ -1,6 +1,9 @@
 # Environment variables
 .env
 
+# Détections personnalisées
+detections.json
+
 # Python
 __pycache__/
 *.py[cod]

@@ -15,10 +15,9 @@
                 <i class="bi bi-camera-video"></i> IAction - Analyse Vidéo IA
             </span>
             <div class="d-flex align-items-center">
-                <span id="status-indicator" class="badge bg-secondary me-2">Arrêté</span>
-                <button id="emergency-stop" class="btn btn-danger btn-sm">
-                    <i class="bi bi-stop-circle"></i> Arrêt d'urgence
-                </button>
+                <a href="/admin" class="btn btn-outline-light btn-sm">
+                    <i class="bi bi-gear"></i> Administration
+                </a>
             </div>
         </div>
     </nav>
@@ -29,23 +28,25 @@
             <div class="col-md-4">
                 <div class="card mb-3">
                     <div class="card-header">
-                        <h5><i class="bi bi-gear"></i> Configuration Caméra</h5>
+                        <h5><i class="bi bi-controller"></i> Contrôles</h5>
                     </div>
                     <div class="card-body">
-                        <div class="mb-3">
-                            <label for="rtsp-url" class="form-label">URL du flux RTSP</label>
-                            <input type="text" id="rtsp-url" class="form-control" 
-                                   placeholder="rtsp://username:password@ip:port/stream">
-                            <div class="form-text">Entrez l'URL complète de votre flux RTSP.</div>
-                        </div>
-                        
                         <div class="d-grid gap-2">
                             <button id="start-capture" class="btn btn-success">
-                                <i class="bi bi-play-circle"></i> Démarrer la capture
+                                <span id="start-capture-content">
+                                    <i class="bi bi-play-circle"></i> Démarrer la capture
+                                </span>
+                                <span id="start-capture-loading" class="d-none">
+                                    <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                                    Démarrage en cours...
+                                </span>
                             </button>
                             <button id="stop-capture" class="btn btn-danger" disabled>
                                 <i class="bi bi-stop-circle"></i> Arrêter la capture
                             </button>
+                        </div>
+                        <div class="form-text mt-2">
+                            <i class="bi bi-info-circle"></i> Configurez l'URL RTSP dans la section Administration
                         </div>
                     </div>
                 </div>
@@ -57,16 +58,22 @@
                     </div>
                     <div class="card-body">
                         <div class="row text-center">
-                            <div class="col-6">
+                            <div class="col-4">
                                 <div class="p-2 border rounded bg-success-subtle">
                                     <h6 class="mb-0">FPS</h6>
                                     <p id="analysis-fps" class="h4 mb-0">0.00</p>
                                 </div>
                             </div>
-                            <div class="col-6">
+                            <div class="col-4">
                                 <div class="p-2 border rounded bg-primary-subtle">
                                     <h6 class="mb-0">Durée (s)</h6>
                                     <p id="analysis-duration" class="h4 mb-0">0.00</p>
+                                </div>
+                            </div>
+                            <div class="col-4">
+                                <div class="p-2 border rounded bg-warning-subtle">
+                                    <h6 class="mb-0"><i class="bi bi-people"></i> Personnes</h6>
+                                    <p id="people-count" class="h4 mb-0">0</p>
                                 </div>
                             </div>
                         </div>
@@ -101,9 +108,33 @@
                     <div class="card-body text-center">
                         <div id="video-container">
                             <img id="video-stream" src="" alt="Flux vidéo" class="img-fluid rounded" style="display: none; max-height: 500px;">
-                            <div id="no-video" class="text-muted">
-                                <i class="bi bi-camera-video-off" style="font-size: 4rem;"></i>
-                                <p class="mt-2">Aucun flux vidéo actif</p>
+                            
+                            <!-- État par défaut : Pas de capture -->
+                            <div id="no-capture" class="py-5">
+                                <div class="mb-4">
+                                    <i class="bi bi-play-circle text-primary" style="font-size: 5rem;"></i>
+                                </div>
+                                <h5 class="text-muted mb-3">Prêt à démarrer</h5>
+                                <p class="text-muted mb-4">Démarrez une capture RTSP pour voir le flux vidéo en direct</p>
+                                <div class="d-flex justify-content-center gap-2">
+                                    <span class="badge bg-light text-dark"><i class="bi bi-camera"></i> RTSP</span>
+                                    <span class="badge bg-light text-dark"><i class="bi bi-robot"></i> IA</span>
+                                    <span class="badge bg-light text-dark"><i class="bi bi-graph-up"></i> Métriques</span>
+                                </div>
+                            </div>
+                            
+                            <!-- État : Capture active mais flux masqué -->
+                            <div id="capture-ready" class="py-5" style="display: none;">
+                                <div class="mb-4">
+                                    <i class="bi bi-eye text-success" style="font-size: 5rem;"></i>
+                                </div>
+                                <h5 class="text-success mb-3">Capture en cours</h5>
+                                <p class="text-muted mb-4">Cliquez sur "Voir le flux live" pour afficher la vidéo</p>
+                                <div class="d-flex justify-content-center gap-2">
+                                    <span class="badge bg-success"><i class="bi bi-record-circle"></i> Actif</span>
+                                    <span class="badge bg-info"><i class="bi bi-cpu"></i> Analyse IA</span>
+                                    <span class="badge bg-warning"><i class="bi bi-broadcast"></i> MQTT</span>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -147,6 +178,15 @@
                             <textarea id="detection-phrase" class="form-control" rows="3" required
                                       placeholder="Ex: un homme qui tient un rouleau de scotch"></textarea>
                             <div class="form-text">Décrivez précisément ce que l'IA doit détecter dans l'image</div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="detection-webhook" class="form-label">Webhook URL <span class="text-muted">(optionnel)</span></label>
+                            <input type="url" id="detection-webhook" class="form-control"
+                                   placeholder="https://example.com/webhook">
+                            <div class="form-text">
+                                <i class="bi bi-info-circle"></i> URL appelée automatiquement lors de la détection
+                                <br><small class="text-muted">Données envoyées : detection_id, detection_name, triggered, timestamp</small>
+                            </div>
                         </div>
                     </form>
                 </div>

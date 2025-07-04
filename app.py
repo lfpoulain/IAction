@@ -144,10 +144,25 @@ def get_metrics():
     """Endpoint léger pour les métriques de performance uniquement"""
     global last_analysis_time, last_analysis_duration
     
+    # Récupérer le nombre de personnes depuis le service de détection
+    people_count = 0
+    if hasattr(detection_service, 'last_analysis_results') and detection_service.last_analysis_results:
+        people_count = detection_service.last_analysis_results.get('people_count', 0)
+    
     return jsonify({
         'last_analysis_time': last_analysis_time,
         'last_analysis_duration': last_analysis_duration,
+        'people_count': people_count,
         'timestamp': time.time()
+    })
+
+@app.route('/api/capture_status')
+def get_capture_status():
+    """Retourne l'état actuel de la capture"""
+    global is_capturing
+    return jsonify({
+        'is_capturing': is_capturing,
+        'camera_active': camera_service.is_capturing if hasattr(camera_service, 'is_capturing') else False
     })
 
 @app.route('/api/start_capture', methods=['POST'])
@@ -232,16 +247,27 @@ def get_detections():
 
 @app.route('/api/detections', methods=['POST'])
 def add_detection():
-    """Ajoute une nouvelle détection personnalisée"""
+    """Ajoute une nouvelle détection personnalisée avec webhook optionnel"""
     data = request.json
     name = data.get('name')
     phrase = data.get('phrase')
+    webhook_url = data.get('webhook_url')  # Optionnel
     
     if not name or not phrase:
         return jsonify({'error': 'Nom et phrase requis'}), 400
     
-    detection_id = detection_service.add_detection(name, phrase)
-    return jsonify({'id': detection_id, 'status': 'Détection ajoutée'})
+    # Valider l'URL du webhook si fournie
+    if webhook_url and not (webhook_url.startswith('http://') or webhook_url.startswith('https://')):
+        return jsonify({'error': 'URL webhook invalide (doit commencer par http:// ou https://)'}), 400
+    
+    detection_id = detection_service.add_detection(name, phrase, webhook_url)
+    
+    response_data = {'id': detection_id, 'status': 'Détection ajoutée'}
+    if webhook_url:
+        response_data['webhook_configured'] = True
+        response_data['webhook_url'] = webhook_url
+    
+    return jsonify(response_data)
 
 @app.route('/api/detections/<detection_id>', methods=['DELETE'])
 def delete_detection(detection_id):
@@ -333,7 +359,7 @@ def capture_loop():
     """Boucle principale de capture et analyse"""
     global current_frame, is_capturing, analysis_in_progress, last_analysis_time, last_analysis_duration
     
-    min_analysis_interval = 0.5  # Intervalle minimum entre les analyses (secondes)
+    min_analysis_interval = 0.1  # Intervalle minimum entre les analyses (secondes)
     
     while is_capturing:
         frame = camera_service.get_frame()
@@ -399,6 +425,162 @@ def analyze_frame(frame, start_time):
     finally:
         # Marquer l'analyse comme terminée, qu'elle ait réussi ou échoué
         analysis_in_progress = False
+
+@app.route('/admin')
+def admin():
+    """Page d'administration"""
+    return render_template('admin.html')
+
+@app.route('/api/admin/config', methods=['GET'])
+def get_admin_config():
+    """Récupère la configuration actuelle"""
+    try:
+        config = {}
+        
+        # Lire le fichier .env
+        env_path = '.env'
+        if os.path.exists(env_path):
+            with open(env_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#') and '=' in line:
+                        key, value = line.split('=', 1)
+                        config[key] = value
+        
+        # Ajouter les paramètres par défaut s'ils n'existent pas
+        defaults = {
+            'AI_API_MODE': 'lmstudio',
+            'AI_TIMEOUT': '60',
+            'OPENAI_API_KEY': '',
+            'OPENAI_MODEL': 'gpt-4-vision-preview',
+            'LMSTUDIO_URL': 'http://127.0.0.1:11434/v1',
+            'LMSTUDIO_MODEL': '',
+            'MQTT_BROKER': '10.0.0.5',
+            'MQTT_PORT': '1883',
+            'MQTT_USERNAME': '',
+            'MQTT_PASSWORD': '',
+            'HA_DEVICE_NAME': 'IAction',
+            'HA_DEVICE_ID': 'iaction_camera',
+            'DEFAULT_RTSP_URL': 'rtsp://localhost:554/live',
+            'RTSP_USERNAME': '',
+            'RTSP_PASSWORD': '',
+            'MIN_ANALYSIS_INTERVAL': '0.1'
+        }
+        
+        for key, default_value in defaults.items():
+            if key not in config:
+                config[key] = default_value
+        
+        return jsonify(config)
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Erreur lors de la lecture de la configuration: {str(e)}'
+        }), 500
+
+@app.route('/api/admin/config', methods=['POST'])
+def save_admin_config():
+    """Sauvegarde la configuration"""
+    try:
+        config = request.get_json()
+        
+        if not config:
+            return jsonify({
+                'success': False,
+                'error': 'Aucune configuration fournie'
+            }), 400
+        
+        # Construire le contenu du fichier .env
+        env_content = []
+        
+        # Configuration IA
+        env_content.append("# Configuration IA")
+        env_content.append(f"AI_API_MODE={config.get('AI_API_MODE', 'lmstudio')}")
+        env_content.append(f"AI_TIMEOUT={config.get('AI_TIMEOUT', '60')}")
+        env_content.append("")
+        
+        # Configuration OpenAI
+        env_content.append("# Configuration OpenAI")
+        env_content.append(f"OPENAI_API_KEY={config.get('OPENAI_API_KEY', '')}")
+        env_content.append(f"OPENAI_MODEL={config.get('OPENAI_MODEL', 'gpt-4-vision-preview')}")
+        env_content.append("")
+        
+        # Configuration LM Studio
+        env_content.append("# Configuration LM Studio")
+        env_content.append(f"LMSTUDIO_URL={config.get('LMSTUDIO_URL', 'http://127.0.0.1:11434/v1')}")
+        env_content.append(f"LMSTUDIO_MODEL={config.get('LMSTUDIO_MODEL', '')}")
+        env_content.append("")
+        
+        # Configuration MQTT
+        env_content.append("# Configuration MQTT")
+        env_content.append(f"MQTT_BROKER={config.get('MQTT_BROKER', '10.0.0.5')}")
+        env_content.append(f"MQTT_PORT={config.get('MQTT_PORT', '1883')}")
+        env_content.append(f"MQTT_USERNAME={config.get('MQTT_USERNAME', '')}")
+        env_content.append(f"MQTT_PASSWORD={config.get('MQTT_PASSWORD', '')}")
+        env_content.append("")
+        
+        # Configuration Home Assistant
+        env_content.append("# Configuration Home Assistant")
+        env_content.append(f"HA_DEVICE_NAME={config.get('HA_DEVICE_NAME', 'IAction')}")
+        env_content.append(f"HA_DEVICE_ID={config.get('HA_DEVICE_ID', 'iaction_camera')}")
+        env_content.append("")
+        
+        # Configuration Caméra
+        env_content.append("# Configuration Caméra")
+        env_content.append(f"DEFAULT_RTSP_URL={config.get('DEFAULT_RTSP_URL', 'rtsp://localhost:554/live')}")
+        env_content.append(f"RTSP_USERNAME={config.get('RTSP_USERNAME', '')}")
+        env_content.append(f"RTSP_PASSWORD={config.get('RTSP_PASSWORD', '')}")
+        env_content.append("")
+        
+        # Configuration Analyse
+        env_content.append("# Configuration Analyse")
+        env_content.append(f"MIN_ANALYSIS_INTERVAL={config.get('MIN_ANALYSIS_INTERVAL', '0.1')}")
+        
+        # Écrire le fichier .env
+        with open('.env', 'w', encoding='utf-8') as f:
+            f.write('\n'.join(env_content))
+        
+        return jsonify({
+            'success': True,
+            'message': 'Configuration sauvegardée avec succès'
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Erreur lors de la sauvegarde: {str(e)}'
+        }), 500
+
+
+
+@app.route('/api/admin/restart', methods=['POST'])
+def restart_app():
+    """Redémarre l'application"""
+    try:
+        import signal
+        import sys
+        
+        # Nettoyer les ressources
+        cleanup()
+        
+        # Programmer le redémarrage
+        def restart():
+            time.sleep(1)
+            os.execv(sys.executable, ['python'] + sys.argv)
+        
+        threading.Thread(target=restart).start()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Redémarrage en cours...'
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Erreur lors du redémarrage: {str(e)}'
+        }), 500
 
 # Fonction pour nettoyer les ressources avant l'arrêt de l'application
 def cleanup():

@@ -12,31 +12,18 @@ class IActionApp {
     
     init() {
         this.setupEventListeners();
-        this.loadConfig();
         this.loadDetections();
+        this.checkCaptureStatus(); // Vérifier si une capture est déjà en cours
         this.startStatusUpdates();
         this.addLog('Application initialisée', 'info');
     }
     
-    async loadConfig() {
-        try {
-            const response = await fetch('/api/config');
-            const config = await response.json();
-            
-            if (config.rtsp_url) {
-                document.getElementById('rtsp-url').value = config.rtsp_url;
-                this.addLog('Configuration RTSP chargée depuis le serveur.', 'info');
-            }
-        } catch (error) {
-            this.addLog('Erreur lors du chargement de la configuration: ' + error.message, 'error');
-        }
-    }
+
 
     setupEventListeners() {
         // Contrôles de capture
         document.getElementById('start-capture').addEventListener('click', () => this.startCapture());
         document.getElementById('stop-capture').addEventListener('click', () => this.stopCapture());
-        document.getElementById('emergency-stop').addEventListener('click', () => this.emergencyStop());
         
         // Détections
         document.getElementById('add-detection').addEventListener('click', () => this.showAddDetectionModal());
@@ -86,8 +73,13 @@ class IActionApp {
         this.detections.forEach(detection => {
             const item = document.createElement('div');
             item.className = 'detection-item';
+            
+            // Icône webhook si configuré
+            const webhookIcon = detection.webhook_url ? 
+                '<i class="bi bi-link-45deg text-primary" title="Webhook configuré"></i> ' : '';
+            
             item.innerHTML = `
-                <div class="detection-name">${detection.name}</div>
+                <div class="detection-name">${webhookIcon}${detection.name}</div>
                 <div class="detection-phrase">${detection.phrase}</div>
                 <div class="detection-controls">
                     <span class="badge status-badge bg-secondary">Inactif</span>
@@ -101,13 +93,77 @@ class IActionApp {
         });
     }
     
+    async checkCaptureStatus() {
+        try {
+            const response = await fetch('/api/capture_status');
+            if (response.ok) {
+                const data = await response.json();
+                if (data.is_capturing) {
+                    this.isCapturing = true;
+                    this.captureInProgress = true;
+                    this.updateCaptureControls();
+                    this.showToggleButton();
+                    this.addLog('Capture détectée en cours - Bouton "Voir le flux live" disponible', 'success');
+                } else {
+                    console.log('Aucune capture en cours au démarrage');
+                }
+            }
+        } catch (error) {
+            console.log('Impossible de vérifier l\'\u00e9tat de capture:', error.message);
+        }
+    }
+    
+    async checkCaptureStatusUpdate() {
+        try {
+            const response = await fetch('/api/capture_status');
+            if (response.ok) {
+                const data = await response.json();
+                const wasCapturing = this.captureInProgress;
+                
+                if (data.is_capturing && !wasCapturing) {
+                    // Capture vient de démarrer
+                    this.isCapturing = true;
+                    this.captureInProgress = true;
+                    this.updateCaptureControls();
+                    this.showToggleButton();
+                    this.showCaptureLoading(false); // Masquer le spinner
+                    this.addLog('✅ Capture détectée - Interface mise à jour', 'success');
+                } else if (!data.is_capturing && wasCapturing) {
+                    // Capture vient de s'arrêter
+                    this.isCapturing = false;
+                    this.captureInProgress = false;
+                    this.updateCaptureControls();
+                    this.hideToggleButton();
+                    this.stopVideoStream();
+                    this.showCaptureLoading(false); // Masquer le spinner
+                    this.addLog('⚠️ Capture arrêtée - Interface mise à jour', 'info');
+                }
+            }
+        } catch (error) {
+            // Erreur silencieuse pour éviter le spam
+            console.debug('Vérification d\'\u00e9tat de capture:', error.message);
+        }
+    }
+    
     async startCapture() {
-        const rtspUrl = document.getElementById('rtsp-url').value.trim();
-        if (!rtspUrl) {
-            this.addLog('Veuillez saisir une URL RTSP valide.', 'warning');
+        // Récupérer l'URL RTSP depuis la configuration serveur
+        let rtspUrl = null;
+        try {
+            const configResponse = await fetch('/api/config');
+            const config = await configResponse.json();
+            rtspUrl = config.rtsp_url;
+        } catch (error) {
+            this.addLog('Erreur lors de la récupération de la configuration RTSP', 'error');
             return;
         }
 
+        if (!rtspUrl) {
+            this.addLog('URL RTSP non configurée. Veuillez configurer l\'URL dans la section Administration.', 'warning');
+            return;
+        }
+
+        // Afficher le spinner
+        this.showCaptureLoading(true);
         this.addLog(`Démarrage de la capture RTSP : ${rtspUrl}`, 'info');
 
         try {
@@ -125,7 +181,7 @@ class IActionApp {
 
             const result = await response.json();
 
-            if (result.success || response.ok) {
+            if (response.ok) {
                 this.isCapturing = true;
                 this.captureInProgress = true;
                 this.updateCaptureControls();
@@ -145,6 +201,9 @@ class IActionApp {
         } catch (error) {
             console.error('Erreur de démarrage de la capture:', error);
             this.addLog(`Erreur critique lors du démarrage: ${error.message}`, 'error');
+        } finally {
+            // Masquer le spinner dans tous les cas
+            this.showCaptureLoading(false);
         }
     }
     
@@ -162,35 +221,60 @@ class IActionApp {
                 this.updateCaptureControls();
                 this.hideToggleButton();
                 this.stopVideoStream();
+                this.showCaptureLoading(false); // S'assurer que le spinner est masqué
                 this.addLog('Capture arrêtée', 'info');
             } else {
                 this.addLog(`Erreur: ${result.error}`, 'error');
             }
         } catch (error) {
             this.addLog(`Erreur lors de l'arrêt: ${error.message}`, 'error');
+        } finally {
+            // S'assurer que le spinner est masqué dans tous les cas
+            this.showCaptureLoading(false);
         }
     }
     
-    emergencyStop() {
-        this.stopCapture();
-        this.addLog('ARRÊT D\'URGENCE ACTIVÉ', 'error');
-    }
     
     updateCaptureControls() {
         const startBtn = document.getElementById('start-capture');
         const stopBtn = document.getElementById('stop-capture');
-        const statusIndicator = document.getElementById('status-indicator');
         
         if (this.isCapturing) {
             startBtn.disabled = true;
             stopBtn.disabled = false;
-            statusIndicator.textContent = 'En cours';
-            statusIndicator.className = 'badge bg-success status-running';
         } else {
             startBtn.disabled = false;
             stopBtn.disabled = true;
-            statusIndicator.textContent = 'Arrêté';
-            statusIndicator.className = 'badge bg-secondary status-stopped';
+        }
+    }
+    
+    showCaptureLoading(show) {
+        const startBtn = document.getElementById('start-capture');
+        const startContent = document.getElementById('start-capture-content');
+        const startLoading = document.getElementById('start-capture-loading');
+        
+        // Vérifier que les éléments existent
+        if (!startBtn || !startContent || !startLoading) {
+            console.warn('Eléments du bouton de capture non trouvés');
+            return;
+        }
+        
+        if (show) {
+            // Afficher le spinner et désactiver le bouton
+            startBtn.disabled = true;
+            startContent.classList.add('d-none');
+            startLoading.classList.remove('d-none');
+            console.debug('Spinner affiché');
+        } else {
+            // Masquer le spinner et réactiver le bouton si pas en capture
+            startContent.classList.remove('d-none');
+            startLoading.classList.add('d-none');
+            
+            // Réactiver le bouton seulement si pas en capture
+            if (!this.isCapturing) {
+                startBtn.disabled = false;
+            }
+            console.debug('Spinner masqué, isCapturing:', this.isCapturing);
         }
     }
     
@@ -222,7 +306,9 @@ class IActionApp {
     
     stopVideoStream() {
         const videoStream = document.getElementById('video-stream');
-        const noVideo = document.getElementById('no-video');
+        const captureReady = document.getElementById('capture-ready');
+        const toggleText = document.getElementById('toggle-video-text');
+        const toggleIcon = document.getElementById('toggle-video-stream').querySelector('i');
         
         if (this.videoUpdateInterval) {
             clearInterval(this.videoUpdateInterval);
@@ -231,7 +317,18 @@ class IActionApp {
         
         videoStream.style.display = 'none';
         videoStream.src = '';
-        noVideo.style.display = 'block';
+        
+        // Si capture en cours, afficher l'état "capture ready", sinon l'état par défaut
+        if (this.captureInProgress) {
+            captureReady.style.display = 'block';
+        }
+        
+        // Réinitialiser l'état du bouton toggle
+        this.isVideoStreamVisible = false;
+        if (toggleText) {
+            toggleText.textContent = 'Voir le flux live';
+            toggleIcon.className = 'bi bi-eye';
+        }
     }
     
     showAddDetectionModal() {
@@ -243,22 +340,36 @@ class IActionApp {
     async saveDetection() {
         const name = document.getElementById('detection-name').value.trim();
         const phrase = document.getElementById('detection-phrase').value.trim();
+        const webhookUrl = document.getElementById('detection-webhook').value.trim();
         
         if (!name || !phrase) {
             this.addLog('Nom et phrase requis pour la détection', 'warning');
             return;
         }
         
+        // Valider l'URL webhook si fournie
+        if (webhookUrl && !webhookUrl.match(/^https?:\/\/.+/)) {
+            this.addLog('URL webhook invalide (doit commencer par http:// ou https://)', 'warning');
+            return;
+        }
+        
         try {
+            const requestBody = {
+                name: name,
+                phrase: phrase
+            };
+            
+            // Ajouter le webhook seulement s'il est fourni
+            if (webhookUrl) {
+                requestBody.webhook_url = webhookUrl;
+            }
+            
             const response = await fetch('/api/detections', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({
-                    name: name,
-                    phrase: phrase
-                })
+                body: JSON.stringify(requestBody)
             });
             
             const result = await response.json();
@@ -266,7 +377,15 @@ class IActionApp {
             if (response.ok) {
                 this.addDetectionModal.hide();
                 this.loadDetections();
-                this.addLog(`Détection ajoutée: ${name}`, 'success');
+                
+                let logMessage = `Détection ajoutée: ${name}`;
+                if (result.webhook_configured) {
+                    logMessage += ` 🔗 (avec webhook)`;
+                }
+                this.addLog(logMessage, 'success');
+                
+                // Réinitialiser le formulaire
+                document.getElementById('detection-form').reset();
             } else {
                 this.addLog(`Erreur: ${result.error}`, 'error');
             }
@@ -315,6 +434,10 @@ class IActionApp {
                 // Mettre à jour les indicateurs de temps d'analyse
                 this.updateAnalysisTimeIndicators(data);
             }
+            
+            // Vérifier l'état de capture périodiquement pour détecter les changements
+            await this.checkCaptureStatusUpdate();
+            
         } catch (error) {
             console.error('Erreur lors de la récupération des valeurs des capteurs:', error);
         }
@@ -395,46 +518,96 @@ class IActionApp {
     
     showToggleButton() {
         const toggleButton = document.getElementById('toggle-video-stream');
+        const noCapture = document.getElementById('no-capture');
+        const captureReady = document.getElementById('capture-ready');
+        
         toggleButton.style.display = 'block';
+        noCapture.style.display = 'none';
+        captureReady.style.display = 'block';
+        
         this.addLog('Bouton "Voir le flux live" disponible', 'info');
+    }
+    
+    showToggleButton() {
+        const toggleButton = document.getElementById('toggle-video-stream');
+        const noCapture = document.getElementById('no-capture');
+        const captureReady = document.getElementById('capture-ready');
+        
+        toggleButton.style.display = 'block';
+        noCapture.style.display = 'none';
+        captureReady.style.display = 'block';
+        
+        // Réinitialiser l'état du flux vidéo
+        this.isVideoStreamVisible = false;
     }
     
     hideToggleButton() {
         const toggleButton = document.getElementById('toggle-video-stream');
+        const noCapture = document.getElementById('no-capture');
+        const captureReady = document.getElementById('capture-ready');
+        
         toggleButton.style.display = 'none';
+        noCapture.style.display = 'block';
+        captureReady.style.display = 'none';
+        
         // Réinitialiser l'état du flux vidéo
         this.isVideoStreamVisible = false;
     }
     
     toggleVideoStream() {
         const videoStream = document.getElementById('video-stream');
-        const noVideo = document.getElementById('no-video');
-        const toggleButton = document.getElementById('toggle-video-stream');
+        const captureReady = document.getElementById('capture-ready');
         const toggleText = document.getElementById('toggle-video-text');
-        const toggleIcon = toggleButton.querySelector('i');
+        const toggleIcon = document.getElementById('toggle-video-stream').querySelector('i');
+        
+        // Vérifier si une capture est en cours
+        if (!this.captureInProgress) {
+            this.addLog(' Aucune capture en cours. Démarrez d\'abord une capture RTSP.', 'warning');
+            return;
+        }
         
         if (this.isVideoStreamVisible) {
-            // Masquer le flux
+            // Masquer le flux - retour à l'état "capture ready"
             videoStream.style.display = 'none';
-            noVideo.style.display = 'block';
+            videoStream.src = '';
+            captureReady.style.display = 'block';
+            
             toggleText.textContent = 'Voir le flux live';
             toggleIcon.className = 'bi bi-eye';
             this.isVideoStreamVisible = false;
-            this.addLog('Flux vidéo masqué', 'info');
+            
+            console.log('Flux vidéo masqué');
         } else {
-            // Afficher le flux (seulement si capture en cours)
-            if (this.captureInProgress) {
-                videoStream.src = `/video_feed?t=${Date.now()}`;
-                videoStream.style.display = 'block';
-                noVideo.style.display = 'none';
-                toggleText.textContent = 'Masquer le flux';
-                toggleIcon.className = 'bi bi-eye-slash';
-                this.isVideoStreamVisible = true;
-                this.addLog('Flux vidéo affiché', 'info');
-            } else {
-                this.addLog('Aucune capture en cours - Démarrez d\'abord la capture', 'warning');
-            }
+            // Afficher le flux - masquer l'état "capture ready"
+            videoStream.src = '/video_feed?' + new Date().getTime();
+            videoStream.style.display = 'block';
+            captureReady.style.display = 'none';
+            
+            toggleText.textContent = 'Masquer le flux';
+            toggleIcon.className = 'bi bi-eye-slash';
+            this.isVideoStreamVisible = true;
+            
+            console.log('Flux vidéo affiché');
         }
+    }
+    
+    stopVideoStream() {
+        const videoStream = document.getElementById('video-stream');
+        const captureReady = document.getElementById('capture-ready');
+        const toggleText = document.getElementById('toggle-video-text');
+        const toggleIcon = document.getElementById('toggle-video-stream').querySelector('i');
+        
+        // Arrêter le flux vidéo
+        videoStream.style.display = 'none';
+        videoStream.src = '';
+        captureReady.style.display = 'none';
+        
+        // Réinitialiser le bouton toggle
+        toggleText.textContent = 'Voir le flux live';
+        toggleIcon.className = 'bi bi-eye';
+        this.isVideoStreamVisible = false;
+        
+        console.log('Flux vidéo arrêté');
     }
     
     clearLogs() {

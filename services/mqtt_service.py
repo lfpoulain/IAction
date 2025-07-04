@@ -170,6 +170,15 @@ class MQTTService:
             icon="mdi:timer"
         )
         
+        # Capteur de comptage de personnes
+        self.setup_sensor(
+            sensor_id="people_count",
+            name="Nombre de personnes",
+            device_class="",
+            unit_of_measurement="personnes",
+            icon="mdi:account-group"
+        )
+        
     def setup_sensor(self, sensor_id: str, name: str, device_class: str = "", 
                     unit_of_measurement: str = "", icon: str = "mdi:camera"):
         """Configure un capteur avec autodiscovery Home Assistant"""
@@ -340,17 +349,32 @@ class MQTTService:
             return False
     
     def remove_sensor(self, sensor_id: str, sensor_type: str = "sensor"):
-        """Supprime un capteur de Home Assistant"""
+        """Supprime un capteur de Home Assistant ET nettoie les topics MQTT"""
         if not self.is_connected:
             return False
         
         config_topic = f"homeassistant/{sensor_type}/{self.device_id}_{sensor_id}/config"
         
         try:
-            # Publier un payload vide pour supprimer le capteur
+            # Publier un payload vide pour supprimer le capteur Home Assistant
             self.client.publish(config_topic, "", retain=True)
+            
+            # Supprimer aussi les topics dans l'arborescence IAction
+            if sensor_type == "binary_sensor":
+                # Nettoyer le topic de state du binary sensor
+                state_topic = f"{self.topic_prefix}/binary_sensor/{sensor_id}/state"
+                self.client.publish(state_topic, "", retain=True)
+                print(f"🗑️ Nettoyage topic MQTT: {state_topic}")
+            elif sensor_type == "sensor":
+                # Nettoyer le topic de state du sensor
+                state_topic = f"{self.topic_prefix}/sensor/{sensor_id}/state"
+                self.client.publish(state_topic, "", retain=True)
+                print(f"🗑️ Nettoyage topic MQTT: {state_topic}")
+            
             if sensor_id in self.published_sensors:
                 self.published_sensors.remove(sensor_id)
+            
+            print(f"✅ Capteur {sensor_id} supprimé (Home Assistant + topics MQTT)")
             return True
         except Exception as e:
             print(f"Erreur lors de la suppression du capteur {sensor_id}: {e}")

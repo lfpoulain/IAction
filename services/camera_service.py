@@ -41,15 +41,15 @@ class CameraService:
         if self.cameras_cache is not None and time.time() - self.cache_time < self.cache_duration:
             return self.cameras_cache
         
-        print("=== Détection des caméras RTSP ===")
+        print("=== Chargement des options RTSP ===")
         
         # Seules les caméras RTSP sont supportées
         cameras = self._get_rtsp_cameras()
         
-        print(f"Détection terminée: {len(cameras)} caméra(s) RTSP trouvée(s)")
+        print(f"Options disponibles: {len(cameras)} source(s) RTSP configurée(s)")
         for cam in cameras:
             print(f" - {cam['name']} (type: {cam['type']}, id: {cam['id']})")
-        print("=== Fin de la détection des caméras ===")
+        print("=== Fin du chargement des options ===")
         
         # Mettre en cache le résultat
         self.cameras_cache = cameras
