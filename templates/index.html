@@ -33,23 +33,10 @@
                     </div>
                     <div class="card-body">
                         <div class="mb-3">
-                            <label for="camera-select" class="form-label">Source vidéo</label>
-                            <div class="input-group">
-                                <select id="camera-select" class="form-select">
-                                    <option value="">Chargement...</option>
-                                </select>
-                                <button id="detect-cameras" class="btn btn-outline-secondary" type="button" title="Détecter les vraies caméras USB">
-                                    <i class="bi bi-search"></i>
-                                </button>
-                            </div>
-                            <div class="form-text">Cliquez sur la loupe pour détecter les vraies caméras USB connectées</div>
-                        </div>
-                        
-                        <div id="rtsp-config" class="mb-3" style="display: none;">
-                            <label for="rtsp-url" class="form-label">URL RTSP</label>
+                            <label for="rtsp-url" class="form-label">URL du flux RTSP</label>
                             <input type="text" id="rtsp-url" class="form-control" 
                                    placeholder="rtsp://username:password@ip:port/stream">
-                            <div class="form-text">Exemple: rtsp://admin:password@192.168.1.100:554/stream1</div>
+                            <div class="form-text">Entrez l'URL complète de votre flux RTSP.</div>
                         </div>
                         
                         <div class="d-grid gap-2">
@@ -63,31 +50,23 @@
                     </div>
                 </div>
 
-                <!-- Capteurs fixes -->
+                <!-- Métriques de performance -->
                 <div class="card mb-3">
                     <div class="card-header">
-                        <h5><i class="bi bi-speedometer2"></i> Capteurs Fixes</h5>
+                        <h5><i class="bi bi-speedometer2"></i> Performance d'Analyse</h5>
                     </div>
                     <div class="card-body">
-                        <div class="row text-center mb-3">
-                            <div class="col-12">
-                                <div class="border rounded p-2">
-                                    <div class="h4 text-primary" id="people-count">-</div>
-                                    <small>Personnes</small>
-                                </div>
-                            </div>
-                        </div>
                         <div class="row text-center">
                             <div class="col-6">
-                                <div class="border rounded p-2">
-                                    <div class="h6 text-info" id="last-analysis-time">-</div>
-                                    <small>Dernière analyse</small>
+                                <div class="p-2 border rounded bg-success-subtle">
+                                    <h6 class="mb-0">FPS</h6>
+                                    <p id="analysis-fps" class="h4 mb-0">0.00</p>
                                 </div>
                             </div>
                             <div class="col-6">
-                                <div class="border rounded p-2">
-                                    <div class="h6 text-info" id="analysis-duration">-</div>
-                                    <small>Durée d'analyse</small>
+                                <div class="p-2 border rounded bg-primary-subtle">
+                                    <h6 class="mb-0">Durée (s)</h6>
+                                    <p id="analysis-duration" class="h4 mb-0">0.00</p>
                                 </div>
                             </div>
                         </div>
@@ -113,8 +92,11 @@
             <!-- Flux vidéo -->
             <div class="col-md-8">
                 <div class="card">
-                    <div class="card-header">
+                    <div class="card-header d-flex justify-content-between align-items-center">
                         <h5><i class="bi bi-camera"></i> Flux Vidéo en Direct</h5>
+                        <button id="toggle-video-stream" class="btn btn-outline-primary btn-sm" style="display: none;">
+                            <i class="bi bi-eye"></i> <span id="toggle-video-text">Voir le flux live</span>
+                        </button>
                     </div>
                     <div class="card-body text-center">
                         <div id="video-container">

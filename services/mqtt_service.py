@@ -65,48 +65,30 @@ class MQTTService:
         self.publish_interval = 1.0  # Intervalle minimum entre les publications en secondes
     
     def connect(self):
-        """Se connecte au broker MQTT avec reconnexion automatique"""
-        # Si déjà connecté, ne rien faire
-        if self.client and self.is_connected:
-            print("Déjà connecté au broker MQTT")
-            return True
-            
+        """Établit la connexion au broker MQTT"""
+        print(f"Connexion à {self.broker}:{self.port} (client: {self.client_id})")
+        
+        self.client = mqtt.Client(client_id=self.client_id, protocol=mqtt.MQTTv311, clean_session=False)
+        
+        # Configuration des callbacks
+        self.client.on_connect = self._on_connect
+        self.client.on_disconnect = self._on_disconnect
+        self.client.on_publish = self._on_publish
+        
+        # Configuration de la reconnexion automatique
+        self.client.reconnect_delay_set(min_delay=1, max_delay=120)
+        
+        # Authentification si nécessaire
+        if self.username and self.password:
+            self.client.username_pw_set(self.username, self.password)
+        
         try:
-            # Utiliser l'ID client fixe pour éviter les connexions multiples
-            print(f"Utilisation de l'ID client MQTT fixe: {self.client_id}")
-            self.client = mqtt.Client(client_id=self.client_id, protocol=mqtt.MQTTv311, clean_session=False)
-            
-            # Configuration des callbacks
-            self.client.on_connect = self._on_connect
-            self.client.on_disconnect = self._on_disconnect
-            self.client.on_publish = self._on_publish
-            
-            # Activer la reconnexion automatique
-            self.client.reconnect_delay_set(min_delay=1, max_delay=120)
-            
-            # Authentification si nécessaire
-            if self.username and self.password:
-                print(f"Configuration de l'authentification MQTT avec l'utilisateur: '{self.username}'")
-                try:
-                    self.client.username_pw_set(self.username, self.password)
-                    print("Authentification configurée")
-                except Exception as e:
-                    print(f"Erreur lors de la configuration de l'authentification: {e}")
-            
-            # Connexion avec plus de détails en cas d'erreur
-            print(f"Tentative de connexion à {self.broker}:{self.port}...")
-            try:
-                self.client.connect_async(self.broker, self.port, keepalive=60)
-                print("Connexion asynchrone initialisée, démarrage de la boucle...")
-                self.client.loop_start()
-            except Exception as e:
-                print(f"Exception lors de la connexion MQTT: {str(e)}")
-                return False
-            
+            # Connexion asynchrone
+            self.client.connect_async(self.broker, self.port, keepalive=60)
+            self.client.loop_start()
             return True
-            
         except Exception as e:
-            print(f"Erreur de connexion MQTT: {e}")
+            print(f"❌ Erreur de connexion MQTT: {e}")
             return False
     
     def disconnect(self):
@@ -128,15 +110,16 @@ class MQTTService:
         """Callback de connexion"""
         if rc == 0:
             self.is_connected = True
-            print("Connecté au broker MQTT")
+            print("✅ MQTT: Connecté avec succès")
             
             # Vérifier si c'est une reconnexion ou une première connexion
             if not hasattr(self, '_initial_setup_done') or not self._initial_setup_done:
-                print("Configuration initiale des capteurs fixes...")
+                print("⚙️  MQTT: Configuration des capteurs...")
                 self._setup_fixed_sensors()
                 self._initial_setup_done = True
+                print("✅ MQTT: Capteurs configurés")
             else:
-                print("Reconnexion MQTT - capteurs déjà configurés")
+                print("🔄 MQTT: Reconnecté - capteurs déjà configurés")
         else:
             error_messages = {
                 1: "Protocole incorrect",
@@ -169,13 +152,22 @@ class MQTTService:
     
     def _setup_fixed_sensors(self):
         """Configure les capteurs fixes obligatoires"""
-        # Capteur nombre de personnes
+        # Capteur de performance - FPS d'analyse
         self.setup_sensor(
-            sensor_id="people_count",
-            name="Nombre de personnes",
+            sensor_id="analysis_fps",
+            name="FPS d'analyse",
             device_class="",
-            unit_of_measurement="personnes",
-            icon="mdi:account-group"
+            unit_of_measurement="FPS",
+            icon="mdi:speedometer"
+        )
+        
+        # Capteur de performance - Durée d'analyse
+        self.setup_sensor(
+            sensor_id="analysis_duration",
+            name="Durée d'analyse",
+            device_class="duration",
+            unit_of_measurement="s",
+            icon="mdi:timer"
         )
         
     def setup_sensor(self, sensor_id: str, name: str, device_class: str = "", 
@@ -314,8 +306,8 @@ class MQTTService:
             print(f"Erreur lors de la publication du binary sensor {sensor_id}: {e}")
             return False
             
-    def publish_status(self, status_data: Dict[str, Any]):
-        """Publie les informations de statut de l'analyse
+    def publish_status(self, status_data: Dict[str, Any]) -> bool:
+        """Publie les informations de statut sur MQTT
         
         Args:
             status_data: Dictionnaire contenant les informations de statut
@@ -324,16 +316,18 @@ class MQTTService:
                 - analysis_result: Résultats de l'analyse
         """
         if not self.is_connected:
+            print("⚠️  MQTT: Impossible de publier - pas connecté au broker")
             return False
             
-        # Publier le timestamp de la dernière analyse
-        if 'last_analysis_time' in status_data:
-            self.publish_sensor_value('last_analysis_time', status_data['last_analysis_time'])
+        # Calculer et publier les FPS d'analyse
+        if 'last_analysis_duration' in status_data and status_data['last_analysis_duration'] > 0:
+            fps = 1.0 / status_data['last_analysis_duration']
+            self.publish_sensor_value('analysis_fps', f"{fps:.2f}")
             
         # Publier la durée de la dernière analyse
         if 'last_analysis_duration' in status_data:
             duration = status_data['last_analysis_duration']
-            self.publish_sensor_value('last_analysis_duration', f"{duration:.2f}")
+            self.publish_sensor_value('analysis_duration', f"{duration:.2f}")
             
         # Publier un JSON avec toutes les informations de statut
         try:

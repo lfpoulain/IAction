@@ -36,17 +36,24 @@ last_analysis_duration = 0  # Durée de la dernière analyse en secondes
 def index():
     return render_template('index.html')
 
+@app.route('/api/config')
+def get_config():
+    """Expose la configuration nécessaire au frontend"""
+    config = {
+        'rtsp_url': os.getenv('DEFAULT_RTSP_URL', '')
+    }
+    return jsonify(config)
+
 @app.route('/api/cameras')
 def get_cameras():
-    """Récupère la liste des caméras disponibles"""
+    """Récupère la liste des caméras RTSP disponibles"""
     try:
         cameras = camera_service.get_available_cameras()
         return jsonify({
             'success': True,
             'cameras': cameras,
             'count': len(cameras),
-            'usb_count': len([c for c in cameras if c['type'] == 'usb']),
-            'rtsp_count': len([c for c in cameras if c['type'] == 'rtsp'])
+            'rtsp_count': len(cameras)  # Toutes les caméras sont RTSP maintenant
         })
     except Exception as e:
         print(f"Erreur lors de la récupération des caméras: {e}")
@@ -131,6 +138,17 @@ def get_status():
     }
     
     return jsonify(status)
+
+@app.route('/api/metrics')
+def get_metrics():
+    """Endpoint léger pour les métriques de performance uniquement"""
+    global last_analysis_time, last_analysis_duration
+    
+    return jsonify({
+        'last_analysis_time': last_analysis_time,
+        'last_analysis_duration': last_analysis_duration,
+        'timestamp': time.time()
+    })
 
 @app.route('/api/start_capture', methods=['POST'])
 def start_capture():
@@ -276,8 +294,9 @@ def video_feed():
         while True:
             try:
                 if current_frame is not None:
-                    # Convertir l'image en JPEG
-                    success, buffer = cv2.imencode('.jpg', current_frame)
+                    # Convertir l'image en JPEG avec compression optimisée
+                    encode_params = [cv2.IMWRITE_JPEG_QUALITY, 85]  # Qualité optimisée
+                    success, buffer = cv2.imencode('.jpg', current_frame, encode_params)
                     if success:
                         frame = buffer.tobytes()
                         yield (b'--frame\r\n'
@@ -295,7 +314,7 @@ def video_feed():
                     print(f"Trop d'erreurs dans le flux vidéo, arrêt du flux (connexion #{connection_id})")
                     break
                     
-                time.sleep(0.1)
+                time.sleep(0.033)  # ~30 FPS au lieu de 10 FPS
             except Exception as e:
                 print(f"Exception dans le flux vidéo: {e}")
                 error_count += 1
@@ -341,8 +360,11 @@ def analyze_frame(frame, start_time):
     global analysis_in_progress, last_analysis_time, last_analysis_duration
     
     try:
-        # Encoder l'image en base64
-        _, buffer = cv2.imencode('.jpg', frame)
+        # Redimensionner l'image en 720p (1280x720) pour l'analyse
+        resized_frame = cv2.resize(frame, (1280, 720), interpolation=cv2.INTER_AREA)
+
+        # Encoder l'image redimensionnée en base64
+        _, buffer = cv2.imencode('.jpg', resized_frame)
         img_base64 = base64.b64encode(buffer).decode('utf-8')
         
         # Analyser avec les détections configurées
@@ -389,18 +411,39 @@ import atexit
 atexit.register(cleanup)
 
 if __name__ == '__main__':
-    import sys
+    print("=== DÉMARRAGE IACTION ===")
+    print("Tentative de connexion au broker MQTT...")
     
-    # Vérifier les arguments de ligne de commande
-    debug_mode = '--debug' in sys.argv
-    
-    # Initialiser MQTT une seule fois
+    # Initier la connexion MQTT
     mqtt_service.connect()
     
+    # Attendre que la connexion soit établie (ou échoue)
+    print("Vérification de la connexion MQTT...")
+    import time
+    max_wait = 10  # Attendre maximum 10 secondes
+    wait_time = 0
+    
+    while wait_time < max_wait:
+        if mqtt_service.is_connected:
+            print("✅ MQTT: Connexion réussie au broker")
+            print("✅ MQTT: Capteurs configurés pour Home Assistant")
+            break
+        time.sleep(1)
+        wait_time += 1
+        if wait_time % 3 == 0:
+            print(f"⏳ MQTT: Tentative de connexion... ({wait_time}/{max_wait}s)")
+    
+    if not mqtt_service.is_connected:
+        print("❌ MQTT: Connexion échouée - Les capteurs ne seront pas disponibles")
+        print("   Vérifiez votre broker MQTT et votre configuration .env")
+    
+    print("\n=== DÉMARRAGE DU SERVEUR WEB ===")
+    import sys
+    debug_mode = '--debug' in sys.argv
+    
     if debug_mode:
-        print("Démarrage en mode DEBUG - Attendez-vous à des reconnexions MQTT fréquentes")
+        print("Mode: DEBUG")
         app.run(debug=True, host='0.0.0.0', port=5002, threaded=True, use_reloader=True)
     else:
-        print("Démarrage en mode PRODUCTION - Connexion MQTT stable")
-        # Mode production sans rechargement automatique
+        print("Mode: PRODUCTION")
         app.run(debug=False, host='0.0.0.0', port=5002, threaded=True, use_reloader=False)

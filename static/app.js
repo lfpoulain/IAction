@@ -12,30 +12,31 @@ class IActionApp {
     
     init() {
         this.setupEventListeners();
-        this.loadCameraSources();
+        this.loadConfig();
         this.loadDetections();
         this.startStatusUpdates();
         this.addLog('Application initialisée', 'info');
     }
     
+    async loadConfig() {
+        try {
+            const response = await fetch('/api/config');
+            const config = await response.json();
+            
+            if (config.rtsp_url) {
+                document.getElementById('rtsp-url').value = config.rtsp_url;
+                this.addLog('Configuration RTSP chargée depuis le serveur.', 'info');
+            }
+        } catch (error) {
+            this.addLog('Erreur lors du chargement de la configuration: ' + error.message, 'error');
+        }
+    }
+
     setupEventListeners() {
         // Contrôles de capture
         document.getElementById('start-capture').addEventListener('click', () => this.startCapture());
         document.getElementById('stop-capture').addEventListener('click', () => this.stopCapture());
         document.getElementById('emergency-stop').addEventListener('click', () => this.emergencyStop());
-        
-        // Sélection de caméra
-        document.getElementById('camera-select').addEventListener('change', (e) => {
-            const rtspConfig = document.getElementById('rtsp-config');
-            if (e.target.value === 'rtsp_custom') {
-                rtspConfig.style.display = 'block';
-            } else {
-                rtspConfig.style.display = 'none';
-            }
-        });
-        
-        // Détection des caméras
-        document.getElementById('detect-cameras').addEventListener('click', () => this.detectRealCameras());
         
         // Détections
         document.getElementById('add-detection').addEventListener('click', () => this.showAddDetectionModal());
@@ -44,140 +45,18 @@ class IActionApp {
         // Logs
         document.getElementById('clear-logs').addEventListener('click', () => this.clearLogs());
         
+        // Flux vidéo
+        document.getElementById('toggle-video-stream').addEventListener('click', () => this.toggleVideoStream());
+        
         // Modal
-        const modal = new bootstrap.Modal(document.getElementById('addDetectionModal'));
-        this.addDetectionModal = modal;
-    }
-    
-    async loadCameraSources() {
-        const select = document.getElementById('camera-select');
-        const loadingOption = document.createElement('option');
-        loadingOption.value = '';
-        loadingOption.textContent = 'Détection des caméras en cours...';
-        loadingOption.disabled = true;
-        select.innerHTML = '';
-        select.appendChild(loadingOption);
+        this.addDetectionModal = new bootstrap.Modal(document.getElementById('addDetectionModal'));
         
-        try {
-            const response = await fetch('/api/cameras');
-            const data = await response.json();
-            
-            if (data.success) {
-                const cameras = data.cameras;
-                select.innerHTML = '<option value="">Sélectionnez une source...</option>';
-                
-                cameras.forEach(camera => {
-                    const option = document.createElement('option');
-                    option.value = camera.id;
-                    option.textContent = camera.name;
-                    option.setAttribute('data-type', camera.type);
-                    
-                    // Ajouter des attributs pour les caméras RTSP
-                    if (camera.type === 'rtsp' && camera.url) {
-                        option.setAttribute('data-url', camera.url);
-                    }
-                    
-                    // Ajouter le statut de connexion pour les caméras RTSP
-                    if (camera.test_status) {
-                        const statusEmoji = {
-                            'online': '🟢',
-                            'offline': '🔴',
-                            'error': '⚠️',
-                            'not_configured': '⚪'
-                        };
-                        option.textContent += ` ${statusEmoji[camera.test_status] || ''}`;
-                    }
-                    
-                    select.appendChild(option);
-                });
-                
-                const usbCount = data.usb_count || 0;
-                const rtspCount = data.rtsp_count || 0;
-                
-                this.addLog(`Caméras détectées: ${usbCount} USB, ${rtspCount} RTSP`, 'info');
-                
-                // Mise à jour du bouton de détection
-                this.updateDetectionButton(data.count);
-            } else {
-                throw new Error(data.error || 'Erreur inconnue');
-            }
-        } catch (error) {
-            console.error('Erreur lors du chargement des caméras:', error);
-            select.innerHTML = '<option value="">Erreur de détection</option>';
-            this.addLog(`Erreur lors du chargement des caméras: ${error.message}`, 'error');
-        }
-    }
-    
-    async detectRealCameras() {
-        const select = document.getElementById('camera-select');
-        const detectBtn = document.getElementById('detect-cameras');
+        // Suivi des analyses
+        this.lastAnalysisTime = 0;
         
-        // Désactiver le bouton et afficher le chargement
-        detectBtn.disabled = true;
-        detectBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span>';
-        
-        const loadingOption = document.createElement('option');
-        loadingOption.value = '';
-        loadingOption.textContent = 'Rafraîchissement des caméras...';
-        loadingOption.disabled = true;
-        select.innerHTML = '';
-        select.appendChild(loadingOption);
-        
-        this.addLog('Rafraîchissement de la liste des caméras...', 'info');
-        
-        try {
-            // Utiliser l'API de rafraîchissement pour forcer la mise à jour
-            const response = await fetch('/api/cameras/refresh', {
-                method: 'POST'
-            });
-            const data = await response.json();
-            
-            if (data.success) {
-                const cameras = data.cameras;
-                select.innerHTML = '<option value="">Sélectionnez une source...</option>';
-                
-                cameras.forEach(camera => {
-                    const option = document.createElement('option');
-                    option.value = camera.id;
-                    option.textContent = camera.name;
-                    option.setAttribute('data-type', camera.type);
-                    
-                    // Ajouter des attributs pour les caméras RTSP
-                    if (camera.type === 'rtsp' && camera.url) {
-                        option.setAttribute('data-url', camera.url);
-                    }
-                    
-                    // Ajouter le statut de connexion pour les caméras RTSP
-                    if (camera.test_status) {
-                        const statusEmoji = {
-                            'online': '🟢',
-                            'offline': '🔴',
-                            'error': '⚠️',
-                            'not_configured': '⚪'
-                        };
-                        option.textContent += ` ${statusEmoji[camera.test_status] || ''}`;
-                    }
-                    
-                    select.appendChild(option);
-                });
-                
-                const usbCount = data.usb_count || 0;
-                const rtspCount = data.rtsp_count || 0;
-                
-                this.addLog(`Mise à jour terminée: ${usbCount} USB, ${rtspCount} RTSP trouvée(s)`, 'success');
-                this.updateDetectionButton(data.count);
-            } else {
-                throw new Error(data.error || 'Erreur lors du rafraîchissement');
-            }
-        } catch (error) {
-            console.error('Erreur lors de la détection:', error);
-            select.innerHTML = '<option value="">Erreur de détection</option>';
-            this.addLog(`Erreur lors du rafraîchissement: ${error.message}`, 'error');
-        } finally {
-            // Réactiver le bouton
-            detectBtn.disabled = false;
-            detectBtn.innerHTML = '<i class="bi bi-search"></i>';
-        }
+        // Suivi du flux vidéo
+        this.isVideoStreamVisible = false;
+        this.captureInProgress = false;
     }
     
     async loadDetections() {
@@ -223,73 +102,49 @@ class IActionApp {
     }
     
     async startCapture() {
-        const select = document.getElementById('camera-select');
-        const selectedOption = select.options[select.selectedIndex];
-        
-        if (!selectedOption || !selectedOption.value) {
-            this.addLog('Veuillez sélectionner une source vidéo', 'warning');
+        const rtspUrl = document.getElementById('rtsp-url').value.trim();
+        if (!rtspUrl) {
+            this.addLog('Veuillez saisir une URL RTSP valide.', 'warning');
             return;
         }
-        
-        let source = selectedOption.value;
-        let type = selectedOption.getAttribute('data-type') || 'usb';
-        let rtspUrl = null;
-        
-        // Gestion spéciale pour RTSP personnalisé
-        if (source === 'rtsp_custom') {
-            type = 'rtsp';
-            rtspUrl = document.getElementById('rtsp-url').value.trim();
-            if (!rtspUrl) {
-                this.addLog('Veuillez saisir une URL RTSP', 'warning');
-                return;
-            }
-            source = rtspUrl;
-        } else if (type === 'rtsp') {
-            // Pour les caméras RTSP préconfigurées
-            rtspUrl = selectedOption.getAttribute('data-url') || null;
-        }
-        
-        console.log(`Démarrage capture - Source: ${source}, Type: ${type}, RTSP URL: ${rtspUrl}`);
-        
+
+        this.addLog(`Démarrage de la capture RTSP : ${rtspUrl}`, 'info');
+
         try {
-            const requestBody = {
-                source: source,
-                type: type
-            };
-            
-            if (rtspUrl) {
-                requestBody.rtsp_url = rtspUrl;
-            }
-            
             const response = await fetch('/api/start_capture', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify(requestBody)
+                body: JSON.stringify({
+                    source: rtspUrl,
+                    type: 'rtsp',
+                    rtsp_url: rtspUrl
+                })
             });
-            
+
             const result = await response.json();
-            
+
             if (result.success || response.ok) {
                 this.isCapturing = true;
+                this.captureInProgress = true;
                 this.updateCaptureControls();
-                this.startVideoStream();
-                
-                const message = result.message || `Capture démarrée: ${selectedOption.textContent}`;
+                this.showToggleButton();
+                // Ne pas démarrer automatiquement le flux vidéo
+
+                const message = result.message || `Capture démarrée avec succès.`;
                 this.addLog(message, 'success');
-                
-                // Afficher les infos de la caméra si disponibles
+
                 if (result.camera) {
                     this.displayCameraInfo(result.camera);
                 }
             } else {
-                const errorMsg = result.error || 'Erreur lors du démarrage';
+                const errorMsg = result.error || 'Erreur inconnue lors du démarrage de la capture.';
                 this.addLog(`Erreur: ${errorMsg}`, 'error');
             }
         } catch (error) {
-            console.error('Erreur lors du démarrage:', error);
-            this.addLog(`Erreur lors du démarrage: ${error.message}`, 'error');
+            console.error('Erreur de démarrage de la capture:', error);
+            this.addLog(`Erreur critique lors du démarrage: ${error.message}`, 'error');
         }
     }
     
@@ -303,7 +158,9 @@ class IActionApp {
             
             if (response.ok) {
                 this.isCapturing = false;
+                this.captureInProgress = false;
                 this.updateCaptureControls();
+                this.hideToggleButton();
                 this.stopVideoStream();
                 this.addLog('Capture arrêtée', 'info');
             } else {
@@ -442,17 +299,16 @@ class IActionApp {
     }
     
     startStatusUpdates() {
-        // Augmenter l'intervalle de mise à jour pour réduire le nombre de requêtes
-        // Passer de 2 secondes à 5 secondes
+        // Mise à jour rapide pour réactivité en temps réel
         this.statusInterval = setInterval(() => {
             this.updateSensorValues();
-        }, 5000);
+        }, 1000); // 1 seconde pour meilleure réactivité
     }
     
     async updateSensorValues() {
         try {
-            // Récupérer les informations de statut depuis l'API
-            const response = await fetch('/api/status');
+            // Utiliser l'endpoint léger pour les métriques
+            const response = await fetch('/api/metrics');
             if (response.ok) {
                 const data = await response.json();
                 
@@ -465,30 +321,24 @@ class IActionApp {
     }
     
     updateAnalysisTimeIndicators(statusData) {
-        const lastAnalysisTimeElement = document.getElementById('last-analysis-time');
-        const analysisDurationElement = document.getElementById('analysis-duration');
+        const duration = statusData.last_analysis_duration;
+        const analysisTime = statusData.last_analysis_time;
+        const isValidDuration = duration && duration > 0;
         
-        if (statusData.last_analysis_time) {
-            // Calculer le temps écoulé depuis la dernière analyse
-            const now = Date.now() / 1000; // Timestamp actuel en secondes
-            const elapsed = now - statusData.last_analysis_time;
-            
-            if (elapsed < 60) {
-                lastAnalysisTimeElement.textContent = `${Math.round(elapsed)}s`;
-            } else if (elapsed < 3600) {
-                lastAnalysisTimeElement.textContent = `${Math.floor(elapsed / 60)}m ${Math.round(elapsed % 60)}s`;
-            } else {
-                lastAnalysisTimeElement.textContent = `${Math.floor(elapsed / 3600)}h ${Math.floor((elapsed % 3600) / 60)}m`;
-            }
-        } else {
-            lastAnalysisTimeElement.textContent = '-';
+        // Détecter une nouvelle analyse
+        if (analysisTime && analysisTime !== this.lastAnalysisTime) {
+            this.lastAnalysisTime = analysisTime;
+            // Ajouter un effet visuel pour indiquer une nouvelle analyse
+            const fpsElement = document.getElementById('analysis-fps');
+            fpsElement.style.color = '#28a745'; // Vert pour nouvelle donnée
+            setTimeout(() => fpsElement.style.color = '', 1000); // Retour normal après 1s
         }
         
-        if (statusData.last_analysis_duration) {
-            analysisDurationElement.textContent = `${statusData.last_analysis_duration}s`;
-        } else {
-            analysisDurationElement.textContent = '-';
-        }
+        // Mise à jour optimisée en une seule fois
+        document.getElementById('analysis-fps').textContent = 
+            isValidDuration ? (1 / duration).toFixed(2) : '0.00';
+        document.getElementById('analysis-duration').textContent = 
+            isValidDuration ? duration.toFixed(2) : '0.00';
     }
     
     addLog(message, type = 'info') {
@@ -510,59 +360,80 @@ class IActionApp {
         
         logContainer.appendChild(logEntry);
         
-        // Limiter le nombre d'entrées de log
+        // Limiter le nombre d'entrées de log pour les performances
         const entries = logContainer.querySelectorAll('.log-entry');
-        if (entries.length > 100) {
-            entries[0].remove();
+        if (entries.length > 50) {
+            // Supprimer les 10 plus anciens d'un coup
+            for (let i = 0; i < 10 && i < entries.length; i++) {
+                entries[i].remove();
+            }
         }
         
         // Faire défiler vers le bas
         logContainer.scrollTop = logContainer.scrollHeight;
     }
     
-    updateDetectionButton(cameraCount) {
-        const detectBtn = document.getElementById('detect-cameras');
-        if (detectBtn) {
-            const originalTitle = 'Détecter les vraies caméras USB';
-            if (cameraCount > 0) {
-                detectBtn.title = `${originalTitle} (${cameraCount} détectées)`;
-                detectBtn.classList.add('btn-outline-success');
-                detectBtn.classList.remove('btn-outline-secondary');
-            } else {
-                detectBtn.title = originalTitle;
-                detectBtn.classList.add('btn-outline-secondary');
-                detectBtn.classList.remove('btn-outline-success');
-            }
-        }
-    }
+    // Fonction supprimée - plus de détection USB nécessaire
     
     displayCameraInfo(camera) {
-        if (!camera) return;
+        if (!camera || camera.type !== 'rtsp') return;
         
-        const infoMessage = [];
-        if (camera.type === 'usb') {
-            infoMessage.push(`Type: Caméra USB`);
-            if (camera.resolution) {
-                infoMessage.push(`Résolution: ${camera.resolution}`);
-            }
-            if (camera.path) {
-                infoMessage.push(`Périphérique: ${camera.path}`);
-            }
-        } else if (camera.type === 'rtsp') {
-            infoMessage.push(`Type: Caméra IP (RTSP)`);
-            if (camera.test_status) {
-                const statusText = {
-                    'online': 'En ligne',
-                    'offline': 'Hors ligne',
-                    'error': 'Erreur de connexion',
-                    'not_configured': 'Non configurée'
-                };
-                infoMessage.push(`Statut: ${statusText[camera.test_status] || 'Inconnu'}`);
-            }
+        const infoMessage = ['Type: Caméra RTSP'];
+        
+        if (camera.test_status) {
+            const statusText = {
+                'online': 'En ligne',
+                'offline': 'Hors ligne', 
+                'error': 'Erreur de connexion',
+                'not_configured': 'Non configurée'
+            };
+            infoMessage.push(`Statut: ${statusText[camera.test_status] || 'Inconnu'}`);
         }
         
-        if (infoMessage.length > 0) {
-            this.addLog(`Infos caméra - ${infoMessage.join(', ')}`, 'info');
+        this.addLog(`Infos caméra - ${infoMessage.join(', ')}`, 'info');
+    }
+    
+    showToggleButton() {
+        const toggleButton = document.getElementById('toggle-video-stream');
+        toggleButton.style.display = 'block';
+        this.addLog('Bouton "Voir le flux live" disponible', 'info');
+    }
+    
+    hideToggleButton() {
+        const toggleButton = document.getElementById('toggle-video-stream');
+        toggleButton.style.display = 'none';
+        // Réinitialiser l'état du flux vidéo
+        this.isVideoStreamVisible = false;
+    }
+    
+    toggleVideoStream() {
+        const videoStream = document.getElementById('video-stream');
+        const noVideo = document.getElementById('no-video');
+        const toggleButton = document.getElementById('toggle-video-stream');
+        const toggleText = document.getElementById('toggle-video-text');
+        const toggleIcon = toggleButton.querySelector('i');
+        
+        if (this.isVideoStreamVisible) {
+            // Masquer le flux
+            videoStream.style.display = 'none';
+            noVideo.style.display = 'block';
+            toggleText.textContent = 'Voir le flux live';
+            toggleIcon.className = 'bi bi-eye';
+            this.isVideoStreamVisible = false;
+            this.addLog('Flux vidéo masqué', 'info');
+        } else {
+            // Afficher le flux (seulement si capture en cours)
+            if (this.captureInProgress) {
+                videoStream.src = `/video_feed?t=${Date.now()}`;
+                videoStream.style.display = 'block';
+                noVideo.style.display = 'none';
+                toggleText.textContent = 'Masquer le flux';
+                toggleIcon.className = 'bi bi-eye-slash';
+                this.isVideoStreamVisible = true;
+                this.addLog('Flux vidéo affiché', 'info');
+            } else {
+                this.addLog('Aucune capture en cours - Démarrez d\'abord la capture', 'warning');
+            }
         }
     }
     
