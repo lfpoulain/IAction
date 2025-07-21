@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Utilitaire pour tester et configurer les caméras USB et RTSP
-Facilite la sélection de la bonne caméra sur Linux
+Utilitaire pour tester et configurer les caméras RTSP.
+Facilite la sélection de la bonne caméra sur Linux.
 """
 
 import cv2
@@ -15,44 +15,6 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
 from services.camera_service import CameraService
-
-def test_usb_cameras():
-    """Teste toutes les caméras USB disponibles"""
-    print("🔍 Détection des caméras USB...")
-    
-    camera_service = CameraService()
-    cameras = camera_service.get_available_cameras()
-    
-    usb_cameras = [cam for cam in cameras if cam['type'] == 'usb']
-    
-    if not usb_cameras:
-        print("❌ Aucune caméra USB trouvée")
-        return
-    
-    print(f"✅ {len(usb_cameras)} caméra(s) USB trouvée(s):")
-    
-    for camera in usb_cameras:
-        print(f"\n📹 {camera['name']} (ID: {camera['id']})")
-        print(f"   Résolution: {camera.get('resolution', 'auto')}")
-        
-        if 'path' in camera:
-            print(f"   Chemin: {camera['path']}")
-        
-        if 'supported_formats' in camera and camera['supported_formats']:
-            print(f"   Formats supportés: {len(camera['supported_formats'])}")
-            for fmt in camera['supported_formats'][:3]:  # Limiter l'affichage
-                print(f"     - {fmt['format']}: {fmt['size']}")
-        
-        # Test rapide de capture
-        if camera_service.start_capture(camera['id'], 'usb'):
-            frame = camera_service.get_frame()
-            if frame is not None:
-                print(f"   ✅ Test de capture réussi - {frame.shape}")
-            else:
-                print("   ❌ Erreur lors du test de capture")
-            camera_service.stop_capture()
-        else:
-            print("   ❌ Impossible de démarrer la capture")
 
 def test_rtsp_url(url, username=None, password=None):
     """Teste une URL RTSP"""
@@ -153,16 +115,15 @@ def interactive_camera_selection():
                     if test_rtsp_url(url, username, password):
                         print("✅ Configuration RTSP valide!")
                     
-                elif selected_camera['type'] == 'usb':
-                    # Tester la caméra USB
-                    if camera_service.start_capture(selected_camera['id'], 'usb'):
-                        print("✅ Caméra USB prête!")
-                        
-                        # Optionnel: afficher un aperçu
+                else:
+                    # Tester la caméra sélectionnée
+                    if camera_service.start_capture(selected_camera['id'], 'rtsp'):
+                        print("✅ Caméra prête!")
+
                         show_preview = input("Afficher un aperçu? (o/N): ")
                         if show_preview.lower() == 'o':
                             show_camera_preview(camera_service)
-                        
+
                         camera_service.stop_capture()
                 
                 break
@@ -207,7 +168,6 @@ def show_camera_preview(camera_service, duration=10):
 
 def main():
     parser = argparse.ArgumentParser(description="Testeur de caméras pour IAction")
-    parser.add_argument('--usb', action='store_true', help='Tester les caméras USB')
     parser.add_argument('--rtsp', type=str, help='Tester une URL RTSP')
     parser.add_argument('--username', type=str, help='Nom d\'utilisateur RTSP')
     parser.add_argument('--password', type=str, help='Mot de passe RTSP')
@@ -215,24 +175,13 @@ def main():
     
     args = parser.parse_args()
     
-    if args.usb:
-        test_usb_cameras()
-    elif args.rtsp:
+    if args.rtsp:
         test_rtsp_url(args.rtsp, args.username, args.password)
     elif args.interactive:
         interactive_camera_selection()
     else:
-        # Mode par défaut: afficher toutes les caméras
-        print("🎥 IAction Camera Tester")
-        print("=" * 30)
-        
-        test_usb_cameras()
-        
-        print("\n" + "=" * 30)
-        print("Pour tester une URL RTSP:")
-        print("python camera_tester.py --rtsp rtsp://votre-url")
-        print("\nPour le mode interactif:")
-        print("python camera_tester.py --interactive")
+        # Mode interactif par défaut
+        interactive_camera_selection()
 
 if __name__ == "__main__":
     main()

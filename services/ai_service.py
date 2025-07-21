@@ -4,6 +4,9 @@ import re
 import base64
 from typing import Dict, Any, List
 from openai import OpenAI
+import logging
+
+logger = logging.getLogger(__name__)
 
 class AIService:
     def __init__(self):
@@ -29,14 +32,18 @@ class AIService:
                 timeout=self.timeout
             )
             self.model = self.lmstudio_model
-            print(f"Configuration AI Service (LM Studio):\n - URL: {self.lmstudio_url}\n - Modèle: {self.model}\n - Timeout: {self.timeout}s")
+            logger.info(
+                f"Configuration AI Service (LM Studio):\n - URL: {self.lmstudio_url}\n - Modèle: {self.model}\n - Timeout: {self.timeout}s"
+            )
         else:  # mode 'openai' par défaut
             self.client = OpenAI(
                 api_key=self.openai_api_key,
                 timeout=self.timeout
             )
             self.model = self.openai_model
-            print(f"Configuration AI Service (OpenAI):\n - Modèle: {self.model}\n - Timeout: {self.timeout}s")
+            logger.info(
+                f"Configuration AI Service (OpenAI):\n - Modèle: {self.model}\n - Timeout: {self.timeout}s"
+            )
     
     def analyze_image(self, image_base64: str, prompt: str) -> Dict[str, Any]:
         """Analyse une image avec OpenAI ou LM Studio en utilisant l'API compatible OpenAI"""
@@ -45,7 +52,7 @@ class AIService:
             image_content = f"data:image/jpeg;base64,{image_base64}"
             
             api_name = "LM Studio" if self.api_mode == "lmstudio" else "OpenAI"
-            print(f"Envoi de la requête à {api_name} avec timeout de {self.timeout}s...")
+            logger.info(f"Envoi de la requête à {api_name} avec timeout de {self.timeout}s...")
             
             # Utiliser l'API OpenAI (ou compatible) pour générer la réponse
             response = self.client.chat.completions.create(
@@ -61,7 +68,7 @@ class AIService:
                 max_tokens=500
             )
             
-            print(f"Réponse reçue avec succès de {api_name}")
+            logger.info(f"Réponse reçue avec succès de {api_name}")
             message_content = response.choices[0].message.content
             return {
                 'success': True,
@@ -71,15 +78,17 @@ class AIService:
         except Exception as e:
             api_name = "LM Studio" if self.api_mode == "lmstudio" else "OpenAI"
             error_msg = f'Erreur lors de la connexion à {api_name}: {str(e)}'
-            print(f"Exception: {error_msg}")
+            logger.error(f"Exception: {error_msg}")
             
             if self.api_mode == "lmstudio":
-                print("Assurez-vous que LM Studio est bien installé et en cours d'exécution sur votre machine.")
-                print("Vous pouvez l'installer depuis https://lmstudio.ai/")
+                logger.error("Assurez-vous que LM Studio est bien installé et en cours d'exécution sur votre machine.")
+                logger.error("Vous pouvez l'installer depuis https://lmstudio.ai/")
             else:
-                print("Vérifiez votre clé API OpenAI et votre connexion internet.")
+                logger.error("Vérifiez votre clé API OpenAI et votre connexion internet.")
                 
-            print(f"Essayez d'augmenter le délai dans le fichier .env avec AI_TIMEOUT={self.timeout*2}")
+            logger.info(
+                f"Essayez d'augmenter le délai dans le fichier .env avec AI_TIMEOUT={self.timeout*2}"
+            )
             return {
                 'success': False,
                 'error': error_msg

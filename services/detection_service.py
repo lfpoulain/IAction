@@ -6,6 +6,9 @@ import os
 import requests
 import asyncio
 from typing import Dict, List, Any, Optional
+import logging
+
+logger = logging.getLogger(__name__)
 
 class DetectionService:
     def __init__(self, ai_service, mqtt_service):
@@ -194,7 +197,7 @@ class DetectionService:
             return results
             
         except Exception as e:
-            print(f"Erreur lors de l'analyse de l'image: {e}")
+            logger.error(f"Erreur lors de l'analyse de l'image: {e}")
             results['success'] = False
             results['error'] = str(e)
             return results
@@ -248,16 +251,16 @@ class DetectionService:
             with open(self.detections_file, 'w', encoding='utf-8') as f:
                 json.dump(detections_data, f, indent=2, ensure_ascii=False)
             
-            print(f"✅ Détections sauvegardées: {len(detections_data)} détections")
+            logger.info(f"✅ Détections sauvegardées: {len(detections_data)} détections")
             
         except Exception as e:
-            print(f"⚠️ Erreur lors de la sauvegarde des détections: {e}")
+            logger.error(f"⚠️ Erreur lors de la sauvegarde des détections: {e}")
     
     def load_detections(self):
         """Charge les détections depuis le fichier JSON"""
         try:
             if not os.path.exists(self.detections_file):
-                print("📁 Aucun fichier de détections trouvé, démarrage avec une liste vide")
+                logger.info("📁 Aucun fichier de détections trouvé, démarrage avec une liste vide")
                 return
             
             with open(self.detections_file, 'r', encoding='utf-8') as f:
@@ -282,11 +285,11 @@ class DetectionService:
             if detections_data:
                 self.mqtt_service.flush_message_buffer()
             
-            print(f"✅ Détections chargées: {len(detections_data)} détections")
+            logger.info(f"✅ Détections chargées: {len(detections_data)} détections")
             
         except Exception as e:
-            print(f"⚠️ Erreur lors du chargement des détections: {e}")
-            print("📁 Démarrage avec une liste vide")
+            logger.error(f"⚠️ Erreur lors du chargement des détections: {e}")
+            logger.info("📁 Démarrage avec une liste vide")
     
     def call_webhook(self, detection_id: str, detection_name: str, webhook_url: str, is_match: bool, timestamp: float):
         """Appelle un webhook de manière asynchrone"""
@@ -312,16 +315,16 @@ class DetectionService:
                         headers={'Content-Type': 'application/json'}
                     )
                     if response.status_code == 200:
-                        print(f"🔗 Webhook appelé avec succès pour '{detection_name}': {webhook_url}")
+                        logger.info(f"🔗 Webhook appelé avec succès pour '{detection_name}': {webhook_url}")
                     else:
-                        print(f"⚠️ Webhook échoué pour '{detection_name}' (HTTP {response.status_code}): {webhook_url}")
+                        logger.warning(f"⚠️ Webhook échoué pour '{detection_name}' (HTTP {response.status_code}): {webhook_url}")
                 except requests.exceptions.Timeout:
-                    print(f"⏱️ Timeout webhook pour '{detection_name}': {webhook_url}")
+                    logger.warning(f"⏱️ Timeout webhook pour '{detection_name}': {webhook_url}")
                 except requests.exceptions.RequestException as e:
-                    print(f"❌ Erreur webhook pour '{detection_name}': {e}")
+                    logger.error(f"❌ Erreur webhook pour '{detection_name}': {e}")
             
             # Lancer l'appel en arrière-plan pour ne pas bloquer
             threading.Thread(target=make_webhook_call, daemon=True).start()
             
         except Exception as e:
-            print(f"❌ Erreur lors de la préparation du webhook pour '{detection_name}': {e}")
+            logger.error(f"❌ Erreur lors de la préparation du webhook pour '{detection_name}': {e}")
