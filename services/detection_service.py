@@ -3,8 +3,6 @@ import time
 import threading
 import json
 import os
-import requests
-import asyncio
 from typing import Dict, List, Any, Optional
 import logging
 
@@ -160,15 +158,11 @@ class DetectionService:
                                         self.detections[detection_id]['last_triggered'] = current_time
                                         self.detections[detection_id]['trigger_count'] += 1
                                         
-                                        # Appeler le webhook si configuré
+                                        # Mettre à jour le webhook s'il est configuré (désactivé)
                                         webhook_url = self.detections[detection_id].get('webhook_url')
                                         if webhook_url:
-                                            self.call_webhook(
-                                                detection_id=detection_id,
-                                                detection_name=self.detections[detection_id]['name'],
-                                                webhook_url=webhook_url,
-                                                is_match=is_match,
-                                                timestamp=current_time
+                                            logger.debug(
+                                                f"Webhook ignoré pour '{self.detections[detection_id]['name']}'"
                                             )
                             
                             # Ajouter aux résultats
@@ -291,40 +285,3 @@ class DetectionService:
             logger.error(f"⚠️ Erreur lors du chargement des détections: {e}")
             logger.info("📁 Démarrage avec une liste vide")
     
-    def call_webhook(self, detection_id: str, detection_name: str, webhook_url: str, is_match: bool, timestamp: float):
-        """Appelle un webhook de manière asynchrone"""
-        try:
-            # Préparer les données du webhook
-            webhook_data = {
-                'detection_id': detection_id,
-                'detection_name': detection_name,
-                'triggered': is_match,
-                'timestamp': timestamp,
-                'timestamp_iso': time.strftime('%Y-%m-%dT%H:%M:%S', time.localtime(timestamp)),
-                'source': 'IAction',
-                'device_id': 'iaction_camera_ai'
-            }
-            
-            # Appeler le webhook en arrière-plan
-            def make_webhook_call():
-                try:
-                    response = requests.post(
-                        webhook_url,
-                        json=webhook_data,
-                        timeout=5,
-                        headers={'Content-Type': 'application/json'}
-                    )
-                    if response.status_code == 200:
-                        logger.info(f"🔗 Webhook appelé avec succès pour '{detection_name}': {webhook_url}")
-                    else:
-                        logger.warning(f"⚠️ Webhook échoué pour '{detection_name}' (HTTP {response.status_code}): {webhook_url}")
-                except requests.exceptions.Timeout:
-                    logger.warning(f"⏱️ Timeout webhook pour '{detection_name}': {webhook_url}")
-                except requests.exceptions.RequestException as e:
-                    logger.error(f"❌ Erreur webhook pour '{detection_name}': {e}")
-            
-            # Lancer l'appel en arrière-plan pour ne pas bloquer
-            threading.Thread(target=make_webhook_call, daemon=True).start()
-            
-        except Exception as e:
-            logger.error(f"❌ Erreur lors de la préparation du webhook pour '{detection_name}': {e}")
