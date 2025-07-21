@@ -520,25 +520,15 @@ class IActionApp {
         const toggleButton = document.getElementById('toggle-video-stream');
         const noCapture = document.getElementById('no-capture');
         const captureReady = document.getElementById('capture-ready');
-        
+
         toggleButton.style.display = 'block';
         noCapture.style.display = 'none';
         captureReady.style.display = 'block';
-        
-        this.addLog('Bouton "Voir le flux live" disponible', 'info');
-    }
-    
-    showToggleButton() {
-        const toggleButton = document.getElementById('toggle-video-stream');
-        const noCapture = document.getElementById('no-capture');
-        const captureReady = document.getElementById('capture-ready');
-        
-        toggleButton.style.display = 'block';
-        noCapture.style.display = 'none';
-        captureReady.style.display = 'block';
-        
+
         // Réinitialiser l'état du flux vidéo
         this.isVideoStreamVisible = false;
+
+        this.addLog('Bouton "Voir le flux live" disponible', 'info');
     }
     
     hideToggleButton() {

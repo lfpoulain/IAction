@@ -6,6 +6,7 @@ import time
 import base64
 import json
 import os
+import logging
 from dotenv import load_dotenv
 from services.camera_service import CameraService
 from services.ai_service import AIService
@@ -14,6 +15,8 @@ from services.detection_service import DetectionService
 
 # Charger les variables d'environnement
 load_dotenv(override=True)  # Forcer le remplacement des variables d'environnement existantes
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 CORS(app)
@@ -56,7 +59,7 @@ def get_cameras():
             'rtsp_count': len(cameras)  # Toutes les caméras sont RTSP maintenant
         })
     except Exception as e:
-        print(f"Erreur lors de la récupération des caméras: {e}")
+        logger.error(f"Erreur lors de la récupération des caméras: {e}")
         return jsonify({
             'success': False,
             'error': str(e),
@@ -68,8 +71,8 @@ def refresh_cameras():
     """Force la mise à jour de la liste des caméras"""
     try:
         # Effacer le cache
-        camera_service._camera_cache = None
-        camera_service._cache_time = 0
+        camera_service.cameras_cache = None
+        camera_service.cache_time = 0
         
         # Recharger les caméras
         cameras = camera_service.get_available_cameras()
@@ -79,11 +82,10 @@ def refresh_cameras():
             'message': 'Liste des caméras mise à jour',
             'cameras': cameras,
             'count': len(cameras),
-            'usb_count': len([c for c in cameras if c['type'] == 'usb']),
             'rtsp_count': len([c for c in cameras if c['type'] == 'rtsp'])
         })
     except Exception as e:
-        print(f"Erreur lors de la mise à jour des caméras: {e}")
+        logger.error(f"Erreur lors de la mise à jour des caméras: {e}")
         return jsonify({
             'success': False,
             'error': str(e)
@@ -127,7 +129,7 @@ def get_status():
     
     # Ne logger que périodiquement pour éviter de surcharger les logs
     if current_time - last_status_log_time > status_log_interval:
-        print(f"INFO: {status_request_count} requêtes /api/status reçues dans les {status_log_interval} dernières secondes")
+        logger.info(f"{status_request_count} requêtes /api/status reçues dans les {status_log_interval} dernières secondes")
         status_request_count = 0
         last_status_log_time = current_time
     
@@ -176,7 +178,7 @@ def start_capture():
         source_type = data.get('type')
         rtsp_url = data.get('rtsp_url')  # URL RTSP personnalisée
         
-        print(f"Tentative de démarrage - Source: {source}, Type: {source_type}, RTSP URL: {rtsp_url}")
+        logger.info(f"Tentative de démarrage - Source: {source}, Type: {source_type}, RTSP URL: {rtsp_url}")
         
         if is_capturing:
             return jsonify({
@@ -224,7 +226,7 @@ def start_capture():
         })
         
     except Exception as e:
-        print(f"Erreur lors du démarrage de la capture: {e}")
+        logger.error(f"Erreur lors du démarrage de la capture: {e}")
         return jsonify({
             'success': False,
             'error': str(e)
@@ -306,13 +308,13 @@ def video_feed():
         # Incrémenter le compteur de connexions
         video_feed_connections += 1
         connection_id = video_feed_connections
-        print(f"Démarrage du flux vidéo (connexion #{connection_id})...")
+        logger.info(f"Démarrage du flux vidéo (connexion #{connection_id})...")
         
         # Vérifier si c'est une reconnexion rapide (moins de 5 secondes depuis la dernière connexion)
         global last_video_feed_connection_time
         current_time = time.time()
         if hasattr(app, 'last_video_feed_connection_time') and current_time - app.last_video_feed_connection_time < 5:
-            print(f"Reconnexion rapide détectée (#{connection_id}) - Intervalle: {current_time - app.last_video_feed_connection_time:.2f}s")
+            logger.info(f"Reconnexion rapide détectée (#{connection_id}) - Intervalle: {current_time - app.last_video_feed_connection_time:.2f}s")
         
         # Mettre à jour le temps de la dernière connexion
         app.last_video_feed_connection_time = current_time
@@ -329,28 +331,28 @@ def video_feed():
                                b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
                         error_count = 0  # Réinitialiser le compteur d'erreurs
                     else:
-                        print("Erreur d'encodage de l'image")
+                        logger.error("Erreur d'encodage de l'image")
                         error_count += 1
                 else:
-                    print("Pas d'image disponible")
+                    logger.warning("Pas d'image disponible")
                     error_count += 1
                     
                 # Si trop d'erreurs consécutives, arrêter le flux
                 if error_count > max_errors:
-                    print(f"Trop d'erreurs dans le flux vidéo, arrêt du flux (connexion #{connection_id})")
+                    logger.error(f"Trop d'erreurs dans le flux vidéo, arrêt du flux (connexion #{connection_id})")
                     break
                     
                 time.sleep(0.033)  # ~30 FPS au lieu de 10 FPS
             except Exception as e:
-                print(f"Exception dans le flux vidéo: {e}")
+                logger.exception(f"Exception dans le flux vidéo: {e}")
                 error_count += 1
                 if error_count > max_errors:
-                    print(f"Trop d'exceptions dans le flux vidéo, arrêt du flux (connexion #{connection_id})")
+                    logger.error(f"Trop d'exceptions dans le flux vidéo, arrêt du flux (connexion #{connection_id})")
                     break
                 time.sleep(0.5)  # Attendre un peu plus longtemps en cas d'erreur
         
         # Message de fin de connexion
-        print(f"Fin du flux vidéo (connexion #{connection_id})")
+        logger.info(f"Fin du flux vidéo (connexion #{connection_id})")
         return
     
     return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
@@ -377,7 +379,7 @@ def capture_loop():
                 analysis_thread.daemon = True
                 analysis_thread.start()
                 analysis_in_progress = True
-                print(f"Démarrage d'une nouvelle analyse, {time_since_last_analysis:.1f}s après la dernière")
+                logger.debug(f"Démarrage d'une nouvelle analyse, {time_since_last_analysis:.1f}s après la dernière")
         
         time.sleep(0.033)  # ~30 FPS
 
@@ -404,7 +406,7 @@ def analyze_frame(frame, start_time):
         last_analysis_time = end_time
         last_analysis_duration = duration
         
-        print(f"Analyse terminée en {duration:.2f} secondes")
+        logger.info(f"Analyse terminée en {duration:.2f} secondes")
         
         # Publier les informations d'analyse via MQTT
         mqtt_service.publish_status({
@@ -414,7 +416,7 @@ def analyze_frame(frame, start_time):
         })
         
     except Exception as e:
-        print(f"Erreur lors de l'analyse: {e}")
+        logger.error(f"Erreur lors de l'analyse: {e}")
         # Publier l'erreur via MQTT
         mqtt_service.publish_status({
             'last_analysis_time': time.time(),
@@ -584,7 +586,7 @@ def restart_app():
 
 # Fonction pour nettoyer les ressources avant l'arrêt de l'application
 def cleanup():
-    print("Nettoyage des ressources...")
+    logger.info("Nettoyage des ressources...")
     mqtt_service.disconnect()
     camera_service.stop_capture()
 
@@ -593,39 +595,39 @@ import atexit
 atexit.register(cleanup)
 
 if __name__ == '__main__':
-    print("=== DÉMARRAGE IACTION ===")
-    print("Tentative de connexion au broker MQTT...")
+    logger.info("=== DÉMARRAGE IACTION ===")
+    logger.info("Tentative de connexion au broker MQTT...")
     
     # Initier la connexion MQTT
     mqtt_service.connect()
     
     # Attendre que la connexion soit établie (ou échoue)
-    print("Vérification de la connexion MQTT...")
+    logger.info("Vérification de la connexion MQTT...")
     import time
     max_wait = 10  # Attendre maximum 10 secondes
     wait_time = 0
     
     while wait_time < max_wait:
         if mqtt_service.is_connected:
-            print("✅ MQTT: Connexion réussie au broker")
-            print("✅ MQTT: Capteurs configurés pour Home Assistant")
+            logger.info("✅ MQTT: Connexion réussie au broker")
+            logger.info("✅ MQTT: Capteurs configurés pour Home Assistant")
             break
         time.sleep(1)
         wait_time += 1
         if wait_time % 3 == 0:
-            print(f"⏳ MQTT: Tentative de connexion... ({wait_time}/{max_wait}s)")
+            logger.info(f"⏳ MQTT: Tentative de connexion... ({wait_time}/{max_wait}s)")
     
     if not mqtt_service.is_connected:
-        print("❌ MQTT: Connexion échouée - Les capteurs ne seront pas disponibles")
-        print("   Vérifiez votre broker MQTT et votre configuration .env")
+        logger.error("❌ MQTT: Connexion échouée - Les capteurs ne seront pas disponibles")
+        logger.error("   Vérifiez votre broker MQTT et votre configuration .env")
     
-    print("\n=== DÉMARRAGE DU SERVEUR WEB ===")
+    logger.info("\n=== DÉMARRAGE DU SERVEUR WEB ===")
     import sys
     debug_mode = '--debug' in sys.argv
     
     if debug_mode:
-        print("Mode: DEBUG")
+        logger.info("Mode: DEBUG")
         app.run(debug=True, host='0.0.0.0', port=5002, threaded=True, use_reloader=True)
     else:
-        print("Mode: PRODUCTION")
+        logger.info("Mode: PRODUCTION")
         app.run(debug=False, host='0.0.0.0', port=5002, threaded=True, use_reloader=False)
