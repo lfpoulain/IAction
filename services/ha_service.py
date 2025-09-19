@@ -7,6 +7,7 @@ from typing import Callable, Optional
 import cv2
 import numpy as np
 import requests
+from urllib.parse import urlparse
 
 
 class HAService:
@@ -147,12 +148,31 @@ class HAService:
                     time.sleep(self._remaining(loop_start))
                     continue
 
-                # Anti-cache
-                sep = '&' if '?' in img_url else '?'
-                img_url_nocache = f"{img_url}{sep}t={int(time.time()*1000)}"
+                # Décider si l'on ajoute un paramètre anti-cache
+                base_host = urlparse(self.base_url).netloc if self.base_url else ''
+                urlp = urlparse(img_url)
+                is_same_host = (urlp.netloc == base_host and base_host != '')
+                # Détecter URL signées (ex: S3 presigned) où l'ajout de paramètres casse la signature
+                q = urlp.query or ''
+                is_signed = any(k in q for k in (
+                    'AWSAccessKeyId', 'Signature', 'X-Amz-Signature', 'X-Amz-Algorithm', 'X-Amz-Credential', 'X-Amz-Expires'
+                ))
 
-                # Télécharger l'image
-                img_resp = self.session.get(img_url_nocache, timeout=self.image_timeout)
+                if is_same_host and not is_signed:
+                    sep = '&' if '?' in img_url else '?'
+                    img_url_fetch = f"{img_url}{sep}t={int(time.time()*1000)}"
+                else:
+                    img_url_fetch = img_url
+
+                # Télécharger l'image (éviter d'envoyer l'Authorization HA vers des hôtes tiers)
+                if is_same_host:
+                    img_resp = self.session.get(img_url_fetch, timeout=self.image_timeout)
+                else:
+                    img_resp = requests.get(
+                        img_url_fetch,
+                        timeout=self.image_timeout,
+                        headers={'User-Agent': 'IAction-HA/1.0', 'Accept': 'image/*'}
+                    )
                 if img_resp.status_code != 200:
                     self.logger.warning(f"HA Polling: échec téléchargement image {img_resp.status_code}")
                     time.sleep(self._remaining(loop_start))

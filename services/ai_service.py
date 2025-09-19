@@ -98,6 +98,67 @@ class AIService:
         # Ne pas effectuer de requête réseau au démarrage pour éviter de bloquer l'application
         # Le support strict a été retiré; on fonctionne en mode JSON non strict par défaut
     
+    def reload_from_env(self):
+        """Recharge la configuration AI depuis les variables d'environnement et réinitialise le client."""
+        try:
+            from dotenv import load_dotenv
+            load_dotenv(override=True)
+        except Exception:
+            pass
+
+        # Mettre à jour la configuration
+        self.api_mode = os.environ.get('AI_API_MODE', 'openai').lower()
+        try:
+            self.timeout = int(os.environ.get('AI_TIMEOUT', str(self.timeout)))
+        except Exception:
+            # Conserver l'ancien timeout en cas d'entrée invalide
+            pass
+        self.openai_api_key = os.environ.get('OPENAI_API_KEY', self.openai_api_key)
+        self.openai_model = os.environ.get('OPENAI_MODEL', self.openai_model)
+        self.lmstudio_url = os.environ.get('LMSTUDIO_URL', self.lmstudio_url)
+        self.lmstudio_model = os.environ.get('LMSTUDIO_MODEL', self.lmstudio_model)
+        self.ollama_url = os.environ.get('OLLAMA_URL', self.ollama_url)
+        self.ollama_model = os.environ.get('OLLAMA_MODEL', self.ollama_model)
+
+        # Normaliser les URLs /v1 si nécessaire
+        def _ensure_v1(url: str) -> str:
+            try:
+                p = urlparse(url)
+                if not p.scheme:
+                    return url
+                path = (p.path or '').rstrip('/')
+                if path in ('', '/'):
+                    new_path = '/v1'
+                elif path == '/v1':
+                    new_path = '/v1'
+                else:
+                    return url
+                return urlunparse(p._replace(path=new_path))
+            except Exception:
+                return url
+
+        self.lmstudio_url = _ensure_v1(self.lmstudio_url)
+        self.ollama_url = _ensure_v1(self.ollama_url)
+
+        # Reconstruire le client
+        try:
+            if self.api_mode == 'lmstudio':
+                self.client = OpenAI(base_url=self.lmstudio_url, api_key="lm-studio", timeout=self.timeout)
+                self.model = self.lmstudio_model
+                logger.info(f"AIService rechargé → LM Studio @ {self.lmstudio_url} • modèle={self.model}")
+            elif self.api_mode == 'ollama':
+                self.client = OpenAI(base_url=self.ollama_url, api_key="ollama", timeout=self.timeout)
+                self.model = self.ollama_model
+                logger.info(f"AIService rechargé → Ollama @ {self.ollama_url} • modèle={self.model}")
+            else:
+                self.client = OpenAI(api_key=self.openai_api_key, timeout=self.timeout)
+                self.model = self.openai_model
+                logger.info(f"AIService rechargé → OpenAI • modèle={self.model}")
+            return True
+        except Exception as e:
+            logger.error(f"Erreur lors du rechargement AIService: {e}")
+            return False
+
     def _get_api_name(self) -> str:
         """Retourne le nom de l'API utilisée pour les logs"""
         if self.api_mode == "lmstudio":

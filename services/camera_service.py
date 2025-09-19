@@ -397,3 +397,27 @@ class CameraService:
         except Exception:
             pass
         return None
+
+    def refresh_from_env(self):
+        """Recharge les paramètres RTSP depuis le fichier .env et invalide le cache.
+        N'arrête pas une capture en cours; les nouveaux réglages seront utilisés pour les prochaines actions.
+        """
+        try:
+            load_dotenv(override=True)
+        except Exception:
+            # Même sans dotenv, continuer avec os.environ
+            pass
+        # Recharger la configuration par défaut RTSP
+        self.default_rtsp_urls = [
+            {
+                'name': 'RTSP Default',
+                'url': os.getenv('DEFAULT_RTSP_URL', ''),
+                'username': os.getenv('RTSP_USERNAME', ''),
+                'password': os.getenv('RTSP_PASSWORD', ''),
+                'enabled': bool(os.getenv('DEFAULT_RTSP_URL', ''))
+            }
+        ]
+        # Invalider le cache des caméras pour forcer le recalcul
+        self.cameras_cache = None
+        self.cache_time = 0
+        logger.info("🔄 CameraService: configuration RTSP rechargée depuis .env (cache invalidé)")

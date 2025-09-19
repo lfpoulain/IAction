@@ -25,6 +25,28 @@ class AdminApp {
         }
     }
 
+    async hotReload() {
+        try {
+            this.addLog('🔄 Rechargement à chaud de la configuration...', 'info');
+            const res = await this.fetchWithTimeout('/api/admin/reload', { method: 'POST', timeout: 5000 });
+            if (!res.ok) throw new Error(`Erreur HTTP: ${res.status}`);
+            const data = await res.json();
+            if (data.success) {
+                this.addLog('✅ Configuration rechargée sans redémarrage', 'success');
+                if (data.status) this.consoleLog('debug', data.status);
+                // Recharger les valeurs dans le formulaire depuis le backend
+                await this.loadConfiguration();
+                return true;
+            } else {
+                this.addLog(`❌ Échec du rechargement: ${data.error || 'inconnu'}`, 'error');
+                return false;
+            }
+        } catch (e) {
+            this.addLog(`❌ Erreur rechargement: ${e.message}`, 'error');
+            return false;
+        }
+    }
+
     // Helpers d'affichage pour les badges de statut
     setBadge(badgeId, state, text, title = '') {
         const el = document.getElementById(badgeId);
@@ -62,7 +84,7 @@ class AdminApp {
 
         // Bouton recharger
         document.getElementById('reload-config').addEventListener('click', () => {
-            this.loadConfiguration();
+            this.hotReload();
         });
 
         // Bouton redémarrer
@@ -282,11 +304,10 @@ class AdminApp {
             
             if (result.success) {
                 this.addLog('✅ Configuration sauvegardée avec succès', 'success');
-                // Proposer un redémarrage immédiat
-                if (confirm('Configuration sauvegardée. Voulez-vous redémarrer l\'application maintenant pour appliquer les changements ?')) {
-                    await this.restartApplication();
-                } else {
-                    this.addLog('⚠️ Redémarrez l\'application pour appliquer les changements', 'warning');
+                // Appliquer à chaud sans redémarrage
+                const ok = await this.hotReload();
+                if (!ok) {
+                    this.addLog('⚠️ Application partielle des changements. Vous pouvez redémarrer pour forcer l\'application complète.', 'warning');
                 }
             } else {
                 this.addLog(`❌ Erreur: ${result.error}`, 'error');

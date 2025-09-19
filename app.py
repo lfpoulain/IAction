@@ -949,6 +949,73 @@ def admin_rtsp_test():
             'error': str(e)
         }), 200
 
+@app.route('/api/admin/reload', methods=['POST'])
+def admin_hot_reload():
+    """Recharge la configuration (.env) et reconfigure les services sans redémarrer."""
+    try:
+        # Recharger .env
+        try:
+            load_dotenv(override=True)
+        except Exception:
+            pass
+
+        status = {}
+
+        # Mettre à jour le niveau de logs dynamiquement
+        try:
+            lvl_name = os.getenv('LOG_LEVEL', 'INFO').upper()
+            new_level = getattr(logging, lvl_name, logging.INFO)
+            logging.getLogger().setLevel(new_level)  # root
+            logger.setLevel(new_level)
+            status['log_level'] = lvl_name
+        except Exception as e:
+            status['log_level_error'] = str(e)
+
+        # Recharger AI
+        try:
+            if hasattr(ai_service, 'reload_from_env'):
+                status['ai_reloaded'] = bool(ai_service.reload_from_env())
+            else:
+                status['ai_reloaded'] = False
+        except Exception as e:
+            status['ai_error'] = str(e)
+
+        # Recharger MQTT et reconfigurer les capteurs
+        try:
+            if hasattr(mqtt_service, 'reload_from_env'):
+                status['mqtt_reloaded'] = bool(mqtt_service.reload_from_env())
+            else:
+                status['mqtt_reloaded'] = False
+        except Exception as e:
+            status['mqtt_error'] = str(e)
+
+        try:
+            if getattr(mqtt_service, 'is_connected', False):
+                if hasattr(detection_service, 'reconfigure_mqtt_sensors'):
+                    detection_service.reconfigure_mqtt_sensors()
+                    status['mqtt_sensors_reconfigured'] = True
+        except Exception as e:
+            status['mqtt_sensors_error'] = str(e)
+
+        # Recharger caméra (cache/cfg)
+        try:
+            if hasattr(camera_service, 'refresh_from_env'):
+                camera_service.refresh_from_env()
+                status['camera_refreshed'] = True
+        except Exception as e:
+            status['camera_error'] = str(e)
+
+        # Mettre à jour l'intervalle d'analyse
+        try:
+            detection_service.min_analysis_interval = float(os.getenv('MIN_ANALYSIS_INTERVAL', '0.1'))
+            status['min_analysis_interval'] = detection_service.min_analysis_interval
+        except Exception as e:
+            status['min_analysis_interval_error'] = str(e)
+
+        return jsonify({'success': True, 'status': status})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/admin/config', methods=['POST'])
 def save_admin_config():
     """Sauvegarde la configuration"""

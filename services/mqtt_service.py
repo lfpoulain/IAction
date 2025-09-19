@@ -67,7 +67,53 @@ class MQTTService:
         self.last_publish_time = 0
         self.publish_interval = 1.0  # Intervalle minimum entre les publications en secondes
         self._manual_disconnect = False
-    
+
+    def reload_from_env(self):
+        """Recharge la configuration MQTT depuis .env et reconnecte le client.
+        Conserve les capteurs publiés (Home Assistant) et réutilise le même objet.
+        """
+        try:
+            from dotenv import load_dotenv
+            load_dotenv(override=True)
+        except Exception:
+            pass
+
+        # Déconnecter proprement si déjà connecté
+        try:
+            self.disconnect()
+        except Exception:
+            pass
+
+        # Recharger les paramètres
+        self.broker = os.getenv('MQTT_BROKER', 'localhost')
+        self.port = int(os.getenv('MQTT_PORT', '1883'))
+        self.username = os.getenv('MQTT_USERNAME', '')
+        self.password = os.getenv('MQTT_PASSWORD', '')
+        self.topic_prefix = os.getenv('MQTT_TOPIC_PREFIX', 'iaction')
+        self.device_name = os.getenv('HA_DEVICE_NAME', 'IAction Camera AI')
+        self.device_id = os.getenv('HA_DEVICE_ID', 'iaction_camera_ai')
+
+        # Afficher la configuration rechargée
+        print("=== Configuration MQTT rechargée ===")
+        print(f"Broker: '{self.broker}'")
+        print(f"Port: {self.port}")
+        print(f"Username: '{self.username}'")
+        print(f"Password: '{'*' * len(self.password) if self.password else 'Non défini'}'")
+        print(f"Topic prefix: '{self.topic_prefix}'")
+        print("===================================")
+
+        # Réinitialiser le client et l'état de connexion, conserver published_sensors
+        try:
+            pid = os.getpid()
+        except Exception:
+            pid = int(time.time())
+        self.client_id = f"iaction_client_{self.device_id}_{pid}"
+        self.client = None
+        self.is_connected = False
+
+        # Reconnecter avec la nouvelle configuration
+        return self.connect()
+
     def connect(self):
         """Établit la connexion au broker MQTT"""
         print(f"Connexion à {self.broker}:{self.port} (client: {self.client_id})")
