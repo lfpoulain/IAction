@@ -119,7 +119,7 @@ class DetectionService:
         """Analyse une image avec toutes les détections configurées
         
         Returns:
-            dict: Résultats de l'analyse avec les clés 'people_count', 'detections'
+            dict: Résultats de l'analyse avec la clé 'detections' uniquement
         """
         current_time = time.time()
         
@@ -130,7 +130,6 @@ class DetectionService:
                 return self.last_analysis_results
             else:
                 return {
-                    'people_count': 0,
                     'detections': [],
                     'success': True,
                     'timestamp': current_time,
@@ -138,7 +137,6 @@ class DetectionService:
                 }
         
         results = {
-            'people_count': None,
             'detections': [],
             'success': True,
             'timestamp': current_time
@@ -157,11 +155,6 @@ class DetectionService:
             combined_results = self.ai_service.analyze_combined(image_base64, detections_list)
             
             if combined_results['success']:
-                # Mettre à jour le nombre de personnes
-                if 'people_count' in combined_results and combined_results['people_count']['success']:
-                    results['people_count'] = combined_results['people_count']['count']
-                    self.mqtt_service.buffer_sensor_value('people_count', results['people_count'])
-                
                 # Traiter les résultats des détections personnalisées
                 if 'detections' in combined_results:
                     detection_results = []

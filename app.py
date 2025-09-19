@@ -366,11 +366,6 @@ def get_metrics():
     """Endpoint léger pour les métriques de performance uniquement"""
     global last_analysis_time, last_analysis_duration, last_analysis_total_interval
     
-    # Récupérer le nombre de personnes depuis le service de détection
-    people_count = 0
-    if hasattr(detection_service, 'last_analysis_results') and detection_service.last_analysis_results:
-        people_count = detection_service.last_analysis_results.get('people_count', 0)
-    
     # Calculer FPS dérivés
     analysis_fps = (1.0 / last_analysis_duration) if last_analysis_duration and last_analysis_duration > 0 else 0
     total_fps = (1.0 / last_analysis_total_interval) if last_analysis_total_interval and last_analysis_total_interval > 0 else 0
@@ -381,7 +376,6 @@ def get_metrics():
         'analysis_fps': analysis_fps,
         'analysis_total_interval': last_analysis_total_interval,
         'analysis_total_fps': total_fps,
-        'people_count': people_count,
         'timestamp': time.time()
     })
 
@@ -855,7 +849,6 @@ def get_admin_config():
         defaults = {
             'AI_API_MODE': 'lmstudio',
             'AI_TIMEOUT': '10',
-            'AI_STRICT_OUTPUT': 'false',
             'LOG_LEVEL': 'INFO',
             'OPENAI_MODEL': 'gpt-4-vision-preview',
             'LMSTUDIO_URL': 'http://127.0.0.1:11434/v1',
@@ -975,7 +968,6 @@ def save_admin_config():
         env_content.append("# Configuration IA")
         env_content.append(f"AI_API_MODE={_sanitize_env_value(config.get('AI_API_MODE', 'lmstudio'), 'AI_API_MODE')}")
         env_content.append(f"AI_TIMEOUT={_sanitize_env_value(config.get('AI_TIMEOUT', '10'), 'AI_TIMEOUT')}")
-        env_content.append(f"AI_STRICT_OUTPUT={_sanitize_env_value(config.get('AI_STRICT_OUTPUT', 'false'), 'AI_STRICT_OUTPUT')}")
         env_content.append("")
 
         # Configuration Logs

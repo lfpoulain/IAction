@@ -36,7 +36,7 @@ Copiez `.env.example` vers `.env` puis renseignez selon votre usage.
 
 - IA générale
   - `AI_API_MODE` = `openai` | `lmstudio` | `ollama`
-  - `AI_TIMEOUT` (s), `AI_STRICT_OUTPUT` (true/false)
+  - `AI_TIMEOUT` (s)
   - OpenAI: `OPENAI_API_KEY`, `OPENAI_MODEL` (ex: gpt-4o)
   - LM Studio: `LMSTUDIO_URL`, `LMSTUDIO_MODEL`
   - Ollama: `OLLAMA_URL`, `OLLAMA_MODEL`
@@ -80,12 +80,11 @@ Par défaut: http://localhost:5002
 
 ## Capteurs Home Assistant (MQTT Auto-Discovery)
 Créés par `services/mqtt_service.py`:
-- Sensors:
-  - `analysis_fps` (FPS d’analyse)
+- Metrics exposées via `/api/metrics`:
+  - `last_analysis_time` (timestamp)
   - `analysis_duration` (s)
   - `analysis_total_interval` (s)
   - `analysis_total_fps` (FPS)
-  - `people_count` (nombre de personnes)
 - Binary sensors:
   - `capture_active` (ON/OFF)
   - Un binary sensor par détection personnalisée

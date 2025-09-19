@@ -21,8 +21,6 @@ class AIService:
             self.probe_timeout = float(os.environ.get('AI_PROBE_TIMEOUT', '3'))
         except Exception:
             self.probe_timeout = 3.0
-        # Sortie structurée stricte (JSON uniquement)
-        self.strict_output = str(os.environ.get('AI_STRICT_OUTPUT', 'false')).lower() in ['1', 'true', 'yes', 'on']
         
         # Configuration spécifique à OpenAI
         self.openai_api_key = os.environ.get('OPENAI_API_KEY', '')
@@ -75,7 +73,7 @@ class AIService:
             )
             self.model = self.lmstudio_model
             logger.info(
-                f"Configuration AI Service (LM Studio):\n - URL: {self.lmstudio_url}\n - Modèle: {self.model}\n - Timeout: {self.timeout}s\n - Strict JSON: {self.strict_output}"
+                f"Configuration AI Service (LM Studio):\n - URL: {self.lmstudio_url}\n - Modèle: {self.model}\n - Timeout: {self.timeout}s"
             )
         elif self.api_mode == 'ollama':
             self.client = OpenAI(
@@ -85,7 +83,7 @@ class AIService:
             )
             self.model = self.ollama_model
             logger.info(
-                f"Configuration AI Service (Ollama):\n - URL: {self.ollama_url}\n - Modèle: {self.model}\n - Timeout: {self.timeout}s\n - Strict JSON: {self.strict_output}"
+                f"Configuration AI Service (Ollama):\n - URL: {self.ollama_url}\n - Modèle: {self.model}\n - Timeout: {self.timeout}s"
             )
         else:  # mode 'openai' par défaut
             self.client = OpenAI(
@@ -94,14 +92,11 @@ class AIService:
             )
             self.model = self.openai_model
             logger.info(
-                f"Configuration AI Service (OpenAI):\n - Modèle: {self.model}\n - Timeout: {self.timeout}s\n - Strict JSON: {self.strict_output}"
+                f"Configuration AI Service (OpenAI):\n - Modèle: {self.model}\n - Timeout: {self.timeout}s"
             )
         
         # Ne pas effectuer de requête réseau au démarrage pour éviter de bloquer l'application
-        # Le support strict sera vérifié à la première utilisation si nécessaire
-        self.strict_supported = None
-        if self.strict_output:
-            logger.info("AI_STRICT_OUTPUT activé: la compatibilité json_schema sera vérifiée à la première requête.")
+        # Le support strict a été retiré; on fonctionne en mode JSON non strict par défaut
     
     def _get_api_name(self) -> str:
         """Retourne le nom de l'API utilisée pour les logs"""
@@ -185,7 +180,7 @@ class AIService:
             logger.info(f"Envoi de la requête à {api_name} avec timeout de {self.timeout}s...")
             
             # Utiliser l'API OpenAI (ou compatible) pour générer la réponse
-            if self.api_mode == 'ollama' and not self.strict_output:
+            if self.api_mode == 'ollama':
                 # Alignement Ollama: demander un JSON pur sans schéma
                 response = self.client.chat.completions.create(
                     model=self.model,
@@ -214,7 +209,8 @@ class AIService:
                          ]
                         }
                     ],
-                    max_tokens=500
+                    max_tokens=500,
+                    temperature=0
                 )
             
             logger.info(f"Réponse reçue avec succès de {api_name}")
@@ -260,200 +256,82 @@ class AIService:
         Returns:
             Dict avec les résultats structurés
         """
-        # Construire les prompts selon le mode strict
-        if self.strict_output:
-            # Prompt dédié au mode strict (json_schema): pas d'instructions de format JSON
-            strict_detections = ""
-            for i, detection in enumerate(detections):
-                strict_detections += f"\n- Detection {i+1}: {detection['phrase']}"
-            prompt_strict = (
-                "Analyze this image.\n\n"
-                "Provide: \n"
-                "1) people_count: the number of people visible (integer)\n"
-                "2) detections: for each detection below, set result to true if it matches the image, else false.\n\n"
-                f"Detections:{strict_detections}"
-            )
-        else:
-            # Mode non strict: demander du JSON via le prompt
-            detection_prompts = ""
-            for i, detection in enumerate(detections):
-                detection_prompts += f"\nDetection {i+1}: {detection['phrase']} (Answer with YES or NO)"
-            
-            prompt = f"""Analyze this image and answer the following questions in a structured JSON format:
+        # Prompt simplifié: uniquement des détections en booléen pur (true/false), ordre identique
+        detection_prompts = ""
+        for i, detection in enumerate(detections):
+            detection_prompts += f"\n{i+1}) {detection['phrase']}"
+        
+        prompt = f"""Analyze this image.
 
-1. How many people are visible in the image? (answer with an integer number)
+For each of the following detections, indicate if it matches the image.
 
-{detection_prompts}
+Detections:{detection_prompts}
 
-Format your response as valid JSON like this:
+Return ONLY valid JSON (no other text), exactly in this format:
 {{
-  "people_count": number_of_people,
   "detections": [
-    {{ "id": 1, "result": "YES/NO" }},
-    {{ "id": 2, "result": "YES/NO" }},
-    ...
+    {{ "result": true }},
+    {{ "result": false }}
   ]
 }}
 
-Make sure your response is valid JSON without any additional text before or after."""
+Rules:
+- The detections array MUST have exactly {len(detections)} items, in the same order as listed above.
+- Each result MUST be a boolean: true or false.
+"""
         
-        if self.strict_output:
-            # Mode strict: demander un JSON strict et NE PAS faire de fallback
+        result = self.analyze_image(image_base64, prompt)
+        
+        if result['success']:
             try:
-                image_content = f"data:image/jpeg;base64,{image_base64}"
-                # Schéma strict pour le résultat combiné
-                combined_schema = {
-                    "type": "json_schema",
-                    "json_schema": {
-                        "name": "combined_analysis",
-                        "strict": True,
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": False,
-                            "properties": {
-                                "people_count": {"type": "integer", "minimum": 0},
-                                "detections": {
-                                    "type": "array",
-                                    "items": {
-                                        "type": "object",
-                                        "additionalProperties": False,
-                                        "properties": {
-                                            "result": {"type": "boolean"}
-                                        },
-                                        "required": ["result"]
-                                    }
-                                }
-                            },
-                            "required": ["people_count", "detections"]
-                        }
-                    }
-                }
-                if self.api_mode == 'ollama':
-                    response = self.client.chat.completions.create(
-                        model=self.model,
-                        messages=[
-                            {"role": "user",
-                             "content": [
-                                {"type": "text", "text": prompt_strict},
-                                {"type": "image_url", "image_url": {"url": image_content}}
-                             ]}
-                        ],
-                        max_tokens=700,
-                        temperature=0,
-                        extra_body={
-                            "format": combined_schema
-                        }
-                    )
-                else:
-                    response = self.client.chat.completions.create(
-                        model=self.model,
-                        messages=[
-                            {"role": "user",
-                             "content": [
-                                {"type": "text", "text": prompt_strict},
-                                {"type": "image_url", "image_url": {"url": image_content}}
-                             ]}
-                        ],
-                        max_tokens=700,
-                        temperature=0,
-                        response_format=combined_schema
-                    )
-                message_content = self._extract_content(response) or "{}"
-                try:
-                    parsed_result = self._parse_json_with_fallback(message_content)
-                    if message_content != json.dumps(parsed_result, separators=(',', ':')):
-                        logger.warning("Strict JSON parse required fallback extraction; backend may not enforce pure JSON content.")
-                except Exception as e:
-                    return {
-                        'success': False,
-                        'error': 'Format JSON invalide dans la réponse (mode strict)',
-                        'details': str(e),
-                        'raw_response': (message_content[:500] + '...') if len(message_content) > 500 else message_content
-                    }
+                # Essayer de parser la réponse JSON
+                response_text = result['response'].strip()
                 
+                # Parser le JSON avec fallback pour extraction
+                parsed_result = self._parse_json_with_fallback(response_text)
+                
+                # Structurer la réponse (uniquement les détections)
                 structured_result = {
                     'success': True,
-                    'people_count': {
-                        'success': True,
-                        'count': parsed_result.get('people_count', 0)
-                    },
                     'detections': []
                 }
-                detection_results = parsed_result.get('detections', [])
-                for i, detection_result in enumerate(detection_results):
-                    if i < len(detections):
-                        detection_id = detections[i]['id']
-                        val = detection_result.get('result', False)
-                        is_match = self._validate_detection_result(val)
-                        structured_result['detections'].append({
-                            'id': detection_id,
-                            'success': True,
-                            'match': is_match,
-                            'raw_response': detection_result.get('result', '')
-                        })
+                
+                # Traiter et normaliser la longueur des résultats des détections
+                detection_results = parsed_result.get('detections', []) or []
+                if len(detection_results) > len(detections):
+                    logger.warning(f"IA a renvoyé {len(detection_results)} détections pour {len(detections)} attendues. Les extras seront ignorées.")
+                
+                for i in range(len(detections)):
+                    detection_id = detections[i]['id']
+                    raw_val = None
+                    if i < len(detection_results):
+                        item = detection_results[i] or {}
+                        raw_val = item.get('result')
+                        is_match = self._validate_detection_result(raw_val)
+                    else:
+                        is_match = False
+                    structured_result['detections'].append({
+                        'id': detection_id,
+                        'success': True,
+                        'match': is_match,
+                        'raw_response': raw_val
+                    })
+                
                 return structured_result
-            except Exception as e:
-                msg = (
-                    "AI_STRICT_OUTPUT est activé mais une erreur est survenue (API non supportée ou autre). "
-                    "Désactivez AI_STRICT_OUTPUT dans l'Administration si vous souhaitez revenir au mode non strict."
-                )
-                logger.error(f"Strict JSON error in analyze_combined: {e}")
+            except json.JSONDecodeError as e:
                 return {
                     'success': False,
-                    'error': msg,
-                    'details': str(e)
+                    'error': f'Erreur de décodage JSON: {str(e)}',
+                    'raw_response': response_text
+                }
+            except Exception as e:
+                return {
+                    'success': False,
+                    'error': f'Erreur lors du traitement de la réponse: {str(e)}',
+                    'raw_response': response_text
                 }
         else:
-            result = self.analyze_image(image_base64, prompt)
-            
-            if result['success']:
-                try:
-                    # Essayer de parser la réponse JSON
-                    response_text = result['response'].strip()
-                    
-                    # Parser le JSON avec fallback pour extraction
-                    parsed_result = self._parse_json_with_fallback(response_text)
-                    
-                    # Structurer la réponse
-                    structured_result = {
-                        'success': True,
-                        'people_count': {
-                            'success': True,
-                            'count': parsed_result.get('people_count', 0)
-                        },
-                        'detections': []
-                    }
-                    
-                    # Traiter les résultats des détections
-                    detection_results = parsed_result.get('detections', [])
-                    for i, detection_result in enumerate(detection_results):
-                        if i < len(detections):
-                            detection_id = detections[i]['id']
-                            val = detection_result.get('result', '')
-                            is_match = self._validate_detection_result(val)
-                            
-                            structured_result['detections'].append({
-                                'id': detection_id,
-                                'success': True,
-                                'match': is_match,
-                                'raw_response': detection_result.get('result', '')
-                            })
-                    
-                    return structured_result
-                except json.JSONDecodeError as e:
-                    return {
-                        'success': False,
-                        'error': f'Erreur de décodage JSON: {str(e)}',
-                        'raw_response': response_text
-                    }
-                except Exception as e:
-                    return {
-                        'success': False,
-                        'error': f'Erreur lors du traitement de la réponse: {str(e)}',
-                        'raw_response': response_text
-                    }
-            else:
-                return result
+            return result
     
     def test_connection(self) -> Dict[str, Any]:
         """Teste la connexion avec OpenAI ou LM Studio"""

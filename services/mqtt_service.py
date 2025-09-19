@@ -200,15 +200,6 @@ class MQTTService:
             icon="mdi:speedometer-slow"
         )
         
-        # Capteur de comptage de personnes
-        self.setup_sensor(
-            sensor_id="people_count",
-            name="Nombre de personnes",
-            device_class="",
-            unit_of_measurement="personnes",
-            icon="mdi:account-group"
-        )
-        
         # Binary sensor: Capture en cours
         self.setup_binary_sensor(
             sensor_id="capture_active",
